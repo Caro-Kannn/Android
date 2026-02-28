@@ -19,10 +19,17 @@ package com.duckduckgo.app.browser.urlextraction
 import android.webkit.JavascriptInterface
 import logcat.logcat
 
-class UrlExtractionJavascriptInterface(private val onUrlExtracted: (extractedUrl: String?) -> Unit) {
+class UrlExtractionJavascriptInterface(
+    private val secret: String,
+    private val onUrlExtracted: (extractedUrl: String?) -> Unit,
+) {
 
     @JavascriptInterface
-    fun urlExtracted(extractedUrl: String?) {
+    fun urlExtracted(extractedUrl: String?, secret: String) {
+        if (this.secret != secret) {
+            logcat { "UrlExtractionJavascriptInterface: invalid secret, ignoring urlExtracted call" }
+            return
+        }
         onUrlExtracted(extractedUrl)
     }
 

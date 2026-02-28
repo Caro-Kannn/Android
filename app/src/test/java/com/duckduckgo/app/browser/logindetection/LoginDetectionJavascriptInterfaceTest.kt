@@ -18,17 +18,40 @@ package com.duckduckgo.app.browser.logindetection
 
 import org.junit.Test
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 
 class LoginDetectionJavascriptInterfaceTest {
 
-    @Test
-    fun whenLoginDetectedThenNotifyCallback() {
-        val loginDetected = mock<() -> Unit>()
-        val loginDetectionInterface = LoginDetectionJavascriptInterface(loginDetected)
+    private val validSecret = "test-secret"
 
-        loginDetectionInterface.loginDetected()
+    @Test
+    fun whenLoginDetectedWithValidSecretThenNotifyCallback() {
+        val loginDetected = mock<() -> Unit>()
+        val loginDetectionInterface = LoginDetectionJavascriptInterface(validSecret, loginDetected)
+
+        loginDetectionInterface.loginDetected(validSecret)
 
         verify(loginDetected).invoke()
+    }
+
+    @Test
+    fun whenLoginDetectedWithInvalidSecretThenDoNotNotifyCallback() {
+        val loginDetected = mock<() -> Unit>()
+        val loginDetectionInterface = LoginDetectionJavascriptInterface(validSecret, loginDetected)
+
+        loginDetectionInterface.loginDetected("wrong-secret")
+
+        verify(loginDetected, never()).invoke()
+    }
+
+    @Test
+    fun whenLoginDetectedWithEmptySecretThenDoNotNotifyCallback() {
+        val loginDetected = mock<() -> Unit>()
+        val loginDetectionInterface = LoginDetectionJavascriptInterface(validSecret, loginDetected)
+
+        loginDetectionInterface.loginDetected("")
+
+        verify(loginDetected, never()).invoke()
     }
 }

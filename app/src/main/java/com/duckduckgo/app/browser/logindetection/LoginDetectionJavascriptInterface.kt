@@ -21,7 +21,10 @@ import logcat.LogPriority.INFO
 import logcat.logcat
 
 @Suppress("unused")
-class LoginDetectionJavascriptInterface(private val onLoginDetected: () -> Unit) {
+class LoginDetectionJavascriptInterface(
+    private val secret: String,
+    private val onLoginDetected: () -> Unit,
+) {
 
     @JavascriptInterface
     fun log(message: String) {
@@ -29,7 +32,11 @@ class LoginDetectionJavascriptInterface(private val onLoginDetected: () -> Unit)
     }
 
     @JavascriptInterface
-    fun loginDetected() {
+    fun loginDetected(secret: String) {
+        if (this.secret != secret) {
+            logcat(INFO) { "LoginDetectionInterface: invalid secret, ignoring loginDetected call" }
+            return
+        }
         onLoginDetected()
     }
 

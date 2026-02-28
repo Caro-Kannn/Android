@@ -31,9 +31,30 @@ class BlobConverterJavascriptInterfaceTest {
     }
 
     @Test
-    fun whenConvertToBlobDataUriThenLambdaCalled() {
-        testee.convertBlobToDataUri("first", "second")
+    fun whenConvertToBlobDataUriWithValidDataUrlThenLambdaCalled() {
+        testee.convertBlobToDataUri("data:image/png;base64,abc123", "image/png")
 
-        assertEquals("firstsecond", result)
+        assertEquals("data:image/png;base64,abc123image/png", result)
+    }
+
+    @Test
+    fun whenConvertToBlobDataUriWithErrorThenLambdaCalled() {
+        testee.convertBlobToDataUri("error", "image/png")
+
+        assertEquals("errorimage/png", result)
+    }
+
+    @Test
+    fun whenConvertToBlobDataUriWithInvalidUrlThenLambdaNotCalled() {
+        testee.convertBlobToDataUri("https://attacker.com/evil.exe", "application/octet-stream")
+
+        assertEquals("", result)
+    }
+
+    @Test
+    fun whenConvertToBlobDataUriWithHttpUrlThenLambdaNotCalled() {
+        testee.convertBlobToDataUri("http://attacker.com/evil.exe", "application/octet-stream")
+
+        assertEquals("", result)
     }
 }

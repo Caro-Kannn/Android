@@ -17,28 +17,52 @@
 package com.duckduckgo.app.browser.urlextraction
 
 import org.junit.Test
+import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 
 class UrlExtractionJavascriptInterfaceTest {
 
-    @Test
-    fun whenUrlExtractedThenInvokeCallbackWithUrl() {
-        val onUrlExtracted = mock<(extractedUrl: String?) -> Unit>()
-        val urlExtractionInterface = UrlExtractionJavascriptInterface(onUrlExtracted)
+    private val validSecret = "test-secret"
 
-        urlExtractionInterface.urlExtracted("example.com")
+    @Test
+    fun whenUrlExtractedWithValidSecretThenInvokeCallbackWithUrl() {
+        val onUrlExtracted = mock<(extractedUrl: String?) -> Unit>()
+        val urlExtractionInterface = UrlExtractionJavascriptInterface(validSecret, onUrlExtracted)
+
+        urlExtractionInterface.urlExtracted("example.com", validSecret)
 
         verify(onUrlExtracted).invoke("example.com")
     }
 
     @Test
-    fun whenUrlIsUndefinedThenInvokeCallbackWithNull() {
+    fun whenUrlIsUndefinedAndValidSecretThenInvokeCallbackWithNull() {
         val onUrlExtracted = mock<(extractedUrl: String?) -> Unit>()
-        val urlExtractionInterface = UrlExtractionJavascriptInterface(onUrlExtracted)
+        val urlExtractionInterface = UrlExtractionJavascriptInterface(validSecret, onUrlExtracted)
 
-        urlExtractionInterface.urlExtracted(null)
+        urlExtractionInterface.urlExtracted(null, validSecret)
 
         verify(onUrlExtracted).invoke(null)
+    }
+
+    @Test
+    fun whenUrlExtractedWithInvalidSecretThenDoNotInvokeCallback() {
+        val onUrlExtracted = mock<(extractedUrl: String?) -> Unit>()
+        val urlExtractionInterface = UrlExtractionJavascriptInterface(validSecret, onUrlExtracted)
+
+        urlExtractionInterface.urlExtracted("example.com", "wrong-secret")
+
+        verify(onUrlExtracted, never()).invoke(any())
+    }
+
+    @Test
+    fun whenUrlExtractedWithEmptySecretThenDoNotInvokeCallback() {
+        val onUrlExtracted = mock<(extractedUrl: String?) -> Unit>()
+        val urlExtractionInterface = UrlExtractionJavascriptInterface(validSecret, onUrlExtracted)
+
+        urlExtractionInterface.urlExtracted("example.com", "")
+
+        verify(onUrlExtracted, never()).invoke(any())
     }
 }

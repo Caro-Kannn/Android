@@ -27,9 +27,14 @@ class AutoconsentInterface(
     private val messageHandlerPlugins: PluginPoint<MessageHandlerPlugin>,
     private val webView: WebView,
     private val autoconsentCallback: AutoconsentCallback,
+    private val secret: String,
 ) {
     @JavascriptInterface
-    fun process(message: String) {
+    fun process(message: String, secret: String) {
+        if (this.secret != secret) {
+            logcat { "AutoconsentInterface: invalid secret, ignoring message" }
+            return
+        }
         try {
             val parsedMessage = JSONObject(message)
             val type: String = parsedMessage.getString("type")

@@ -3,7 +3,7 @@ import { consentomatic } from '@duckduckgo/autoconsent/rules/consentomatic.json'
 
 const autoconsent = new AutoConsent(
     (message) => {
-        AutoconsentAndroid.process(JSON.stringify(message));
+        AutoconsentAndroid.process(JSON.stringify(message), window.autoconsentAndroidSecret || '');
     },
     null,
     {  consentomatic },

@@ -4,7 +4,7 @@
 function loginAttemptDetected() {
     try {
         LoginDetection.log("Possible login attempt detected");
-        LoginDetection.loginDetected();
+        LoginDetection.loginDetected(window.loginDetectionSecret || '');
     } catch (error) {}
 }
 

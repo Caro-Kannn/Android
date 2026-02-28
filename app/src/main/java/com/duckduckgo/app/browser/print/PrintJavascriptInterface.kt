@@ -17,11 +17,19 @@
 package com.duckduckgo.app.browser.print
 
 import android.webkit.JavascriptInterface
+import logcat.logcat
 
-class PrintJavascriptInterface(private val onPrintDetected: () -> Unit) {
+class PrintJavascriptInterface(
+    private val secret: String,
+    private val onPrintDetected: () -> Unit,
+) {
 
     @JavascriptInterface
-    fun print() {
+    fun print(secret: String) {
+        if (this.secret != secret) {
+            logcat { "PrintJavascriptInterface: invalid secret, ignoring print call" }
+            return
+        }
         onPrintDetected()
     }
 
