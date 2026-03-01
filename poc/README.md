@@ -1,11 +1,101 @@
-# UXSS PoC — Cross-Origin JS Bridge Attack on DuckDuckGo Android
+# JS-Bridge Attack PoC — DuckDuckGo Android
 
-This directory contains a minimal, self-hostable Proof-of-Concept for the Universal XSS
-vulnerability documented in [`SECURITY_FINDINGS.md`](../SECURITY_FINDINGS.md#1-autoconsentinterface--universal-xss-critical--fixed).
+This directory contains self-hostable Proof-of-Concept pages for the cross-origin JS bridge
+vulnerabilities documented in [`SECURITY_FINDINGS.md`](../SECURITY_FINDINGS.md).
 
 ---
 
-## Vulnerability Summary
+## PoC File Index
+
+| File | Vulnerability | Complexity |
+|------|--------------|------------|
+| `victim.html` + `attacker.html` | #1 AutoconsentInterface — UXSS | Two-server cross-origin |
+| `login-detection-poc.html` | #2 LoginDetectionJavascriptInterface — Login State Spoofing | **Single page** |
+| `login-detection-attacker.html` | #2 cross-origin iframe payload | Embedded in victim |
+
+---
+
+## Why the Original Autoconsent PoC Produced a "Cross-Origin" Error
+
+If you saw an error like:
+
+```
+failed to read a named window: blocked a frame with origin https://example.github.io
+from accessing a cross-origin frame
+```
+
+This came from a **diagnostic step** in the old `attacker.html` that tried to read
+`window.top.autoconsentAndroidSecret` to prove the secret is inaccessible across origins.
+The error is correct and *expected* — it means the SOP is working as designed. It does **not**
+mean the attack call (`AutoconsentAndroid.process()`) failed.
+
+**The diagnostic step has been removed** from `attacker.html` to avoid this confusion.
+The security of the secret is self-evident: a cross-origin iframe simply cannot know a
+per-session UUID that was never communicated to it.
+
+---
+
+## PoC #2 — LoginDetectionJavascriptInterface (Login State Spoofing)
+
+### Simplest demo: single-page standalone PoC
+
+> **No cross-origin server needed.** `login-detection-poc.html` works as a single page.
+
+1. Host the `poc/` directory on any HTTP server (or GitHub Pages):
+   ```bash
+   python3 -m http.server 8080
+   ```
+2. Open `http://localhost:8080/login-detection-poc.html` in the **DuckDuckGo Android browser**.
+3. Press **"Fire Attack"**.
+4. **Expected result (vulnerable build):** DDG's *"Fireproof this site?"* dialog (or autofill
+   credential save prompt) appears for `localhost:8080` — despite no real login having occurred.
+5. **Expected result (fixed build):** No dialog. The empty-secret call is silently rejected.
+
+### Cross-origin iframe demo (enhanced)
+
+To demonstrate that a *cross-origin* iframe can trigger the same dialog:
+
+1. Host victim on port 8080, attacker on port 8081:
+   ```bash
+   python3 -m http.server 8080 &
+   cd /tmp && python3 -m http.server 8081
+   ```
+   *(Or use two different remote hosts / GitHub Pages forks.)*
+
+2. Edit the `iframe src` in `login-detection-poc.html`:
+   ```html
+   <iframe src="http://localhost:8081/login-detection-attacker.html" ...>
+   ```
+
+3. Open `http://localhost:8080/login-detection-poc.html` in DDG Android.
+
+4. The `login-detection-attacker.html` iframe loads from `localhost:8081` (different origin),
+   calls `LoginDetection.loginDetected()`, and DDG shows the fireproof dialog for
+   `localhost:8080` (the victim's URL).
+
+### Attack chain
+
+```
+Any frame (main OR cross-origin iframe)
+  │
+  │  LoginDetection.loginDetected()          ← pre-fix: zero args, no secret
+  │
+  ▼
+LoginDetectionJavascriptInterface.loginDetected()   [@JavascriptInterface — no SOP]
+  │  Pre-fix: calls onLoginDetected() unconditionally
+  │  Fixed:   secret check → rejects unless secret == per-session UUID
+  │
+  ▼
+BrowserTabViewModel.loginDetected()
+  → NavigationAwareLoginDetector.onEvent(LoginAttempt(currentTabUrl))
+  → DDG UI: "Fireproof this site?" dialog for the current tab's URL
+```
+
+---
+
+## PoC #1 — AutoconsentInterface (UXSS)
+
+### Vulnerability Summary
 
 The DuckDuckGo Android browser registers `AutoconsentInterface` on its WebView using
 `addJavascriptInterface()`. Android's API makes every registered object callable from
@@ -65,8 +155,10 @@ Cross-origin iframes cannot read `window.autoconsentAndroidSecret` from the main
 
 ```
 poc/
-├── victim.html    — Simulated banking page (top-level frame, the target)
-└── attacker.html  — Malicious cross-origin iframe content
+├── victim.html                    — Simulated banking page (top-level frame)
+├── attacker.html                  — Cross-origin iframe payload (Autoconsent UXSS)
+├── login-detection-poc.html       — Standalone LoginDetection PoC
+└── login-detection-attacker.html  — Cross-origin iframe payload (LoginDetection)
 ```
 
 ### victim.html
@@ -79,13 +171,12 @@ poc/
 ### attacker.html
 - Runs as a cross-origin iframe inside victim.html
 - Calls `AutoconsentAndroid.process(initPayload)` with no secret (pre-fix call)
-- Also demonstrates that reading `window.top.autoconsentAndroidSecret` across origins
-  is blocked by SOP (so the fix cannot be bypassed)
 - Reports status back to the victim page via `postMessage` for UI feedback
+- **Does NOT access `window.top` or any cross-origin frame properties** (see failure analysis above)
 
 ---
 
-## Setup
+## Setup (for PoC #1 — Autoconsent UXSS)
 
 You need **two separate origins** (two HTTP servers on different ports) so that the iframe
 is genuinely cross-origin. A single file:// URL or a single server would be same-origin and
