@@ -36,6 +36,7 @@ import com.duckduckgo.privacy.config.api.PrivacyConfigCallbackPlugin
 import com.duckduckgo.privacy.config.api.UnprotectedTemporary
 import com.squareup.anvil.annotations.ContributesBinding
 import com.squareup.anvil.annotations.ContributesMultibinding
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -62,6 +63,7 @@ class RealAutoconsent @Inject constructor(
 ) : Autoconsent, PrivacyConfigCallbackPlugin {
 
     private lateinit var autoconsentJs: String
+    private val secret: String = UUID.randomUUID().toString()
 
     init {
         if (isMainProcess) {
@@ -71,13 +73,14 @@ class RealAutoconsent @Inject constructor(
 
     override fun injectAutoconsent(webView: WebView, url: String) {
         if (isAutoconsentEnabled() && !urlInUserAllowList(url) && !isAnException(url)) {
+            webView.evaluateJavascript("javascript:window.autoconsentAndroidSecret='$secret';", null)
             webView.evaluateJavascript("javascript:${getFunctionsJS()}", null)
         }
     }
 
     override fun addJsInterface(webView: WebView, autoconsentCallback: AutoconsentCallback) {
         webView.addJavascriptInterface(
-            AutoconsentInterface(messageHandlerPlugins, webView, autoconsentCallback),
+            AutoconsentInterface(messageHandlerPlugins, webView, autoconsentCallback, secret),
             AUTOCONSENT_INTERFACE,
         )
     }

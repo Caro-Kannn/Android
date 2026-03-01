@@ -25,6 +25,7 @@ import com.duckduckgo.app.browser.logindetection.LoginDetectionJavascriptInterfa
 import com.duckduckgo.app.fire.fireproofwebsite.ui.AutomaticFireproofSetting
 import com.duckduckgo.app.settings.db.SettingsDataStore
 import com.duckduckgo.common.utils.getValidUrl
+import java.util.UUID
 import logcat.LogPriority.INFO
 import logcat.LogPriority.VERBOSE
 import logcat.logcat
@@ -51,12 +52,13 @@ class JsLoginDetector @Inject constructor(private val settingsDataStore: Setting
     DOMLoginDetector {
     private val javaScriptDetector = JavaScriptDetector()
     private val loginPathRegex = Regex("login|sign-in|signin|session")
+    private val secret: String = UUID.randomUUID().toString()
 
     override fun addLoginDetection(
         webView: WebView,
         onLoginDetected: () -> Unit,
     ) {
-        webView.addJavascriptInterface(LoginDetectionJavascriptInterface { onLoginDetected() }, JAVASCRIPT_INTERFACE_NAME)
+        webView.addJavascriptInterface(LoginDetectionJavascriptInterface(secret) { onLoginDetected() }, JAVASCRIPT_INTERFACE_NAME)
     }
 
     @UiThread
@@ -87,23 +89,23 @@ class JsLoginDetector @Inject constructor(private val settingsDataStore: Setting
 
     @UiThread
     private fun scanForPasswordFields(webView: WebView) {
-        webView.evaluateJavascript("javascript:${javaScriptDetector.loginFormDetector(webView.context)}", null)
+        webView.evaluateJavascript("javascript:${javaScriptDetector.loginFormDetector(webView.context, secret)}", null)
     }
 
     @UiThread
     private fun injectLoginFormDetectionJS(webView: WebView) {
-        webView.evaluateJavascript("javascript:${javaScriptDetector.loginFormEventsDetector(webView.context)}", null)
+        webView.evaluateJavascript("javascript:${javaScriptDetector.loginFormEventsDetector(webView.context, secret)}", null)
     }
 
     private class JavaScriptDetector {
         private lateinit var functions: String
         private lateinit var handlers: String
 
-        private fun getFunctionsJS(context: Context): String {
+        private fun getFunctionsJS(context: Context, secret: String): String {
             if (!this::functions.isInitialized) {
                 functions = context.resources.openRawResource(R.raw.login_form_detection_functions).bufferedReader().use { it.readText() }
             }
-            return functions
+            return "window.loginDetectionSecret='$secret';\n$functions"
         }
 
         private fun getHandlersJS(context: Context): String {
@@ -113,12 +115,12 @@ class JsLoginDetector @Inject constructor(private val settingsDataStore: Setting
             return handlers
         }
 
-        fun loginFormEventsDetector(context: Context): String {
-            return wrapIntoAnonymousFunction(getFunctionsJS(context) + getHandlersJS(context))
+        fun loginFormEventsDetector(context: Context, secret: String): String {
+            return wrapIntoAnonymousFunction(getFunctionsJS(context, secret) + getHandlersJS(context))
         }
 
-        fun loginFormDetector(context: Context): String {
-            return wrapIntoAnonymousFunction(getFunctionsJS(context) + "scanForPasswordField();")
+        fun loginFormDetector(context: Context, secret: String): String {
+            return wrapIntoAnonymousFunction(getFunctionsJS(context, secret) + "scanForPasswordField();")
         }
 
         private fun wrapIntoAnonymousFunction(rawJavaScript: String): String {

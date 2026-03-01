@@ -17,6 +17,7 @@
 package com.duckduckgo.app.browser.downloader
 
 import android.webkit.JavascriptInterface
+import logcat.logcat
 
 class BlobConverterJavascriptInterface(private val onBlobConverted: (url: String, mimeType: String) -> Unit) {
 
@@ -25,6 +26,10 @@ class BlobConverterJavascriptInterface(private val onBlobConverted: (url: String
         dataUrl: String,
         contentType: String,
     ) {
+        if (!dataUrl.startsWith("data:") && dataUrl != "error") {
+            logcat { "BlobConverterJavascriptInterface: invalid dataUrl format, ignoring" }
+            return
+        }
         onBlobConverted(dataUrl, contentType)
     }
 

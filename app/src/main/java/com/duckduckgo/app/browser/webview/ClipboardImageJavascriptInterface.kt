@@ -17,13 +17,19 @@
 package com.duckduckgo.app.browser.webview
 
 import android.webkit.JavascriptInterface
+import logcat.logcat
 
 class ClipboardImageJavascriptInterface(
+    private val secret: String,
     private val onImageCopied: (dataUrl: String, mimeType: String) -> Unit,
 ) {
 
     @JavascriptInterface
-    fun copyImageToClipboard(dataUrl: String, mimeType: String) {
+    fun copyImageToClipboard(dataUrl: String, mimeType: String, secret: String) {
+        if (this.secret != secret) {
+            logcat { "ClipboardImageJavascriptInterface: invalid secret, ignoring copyImageToClipboard call" }
+            return
+        }
         onImageCopied(dataUrl, mimeType)
     }
 

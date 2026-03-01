@@ -41,14 +41,15 @@ import com.duckduckgo.browser.api.webviewcompat.WebViewCompatWrapper
 import com.duckduckgo.common.utils.DispatcherProvider
 import com.duckduckgo.di.scopes.AppScope
 import com.squareup.anvil.annotations.ContributesBinding
+import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
+import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import logcat.logcat
 import org.json.JSONObject
-import java.io.File
-import java.io.FileOutputStream
-import javax.inject.Inject
 
 interface ClipboardImageInjector {
     /**
@@ -77,6 +78,7 @@ class ClipboardImageInjectorImpl @Inject constructor(
 
     private val clipboardManager by lazy { context.getSystemService(ClipboardManager::class.java) }
     private var legacyPolyfillScript: String? = null
+    private val legacySecret: String = UUID.randomUUID().toString()
 
     private var requiresLegacyPolyfillInjection: Boolean = true
 
@@ -125,7 +127,7 @@ class ClipboardImageInjectorImpl @Inject constructor(
             val script = legacyPolyfillScript
             if (script != null) {
                 logcat { "ClipboardImageInjector: Injecting legacy polyfill script" }
-                webView.evaluateJavascript("javascript:$script", null)
+                webView.evaluateJavascript("javascript:window.ddgClipboardSecret='$legacySecret';$script", null)
             } else {
                 logcat { "ClipboardImageInjector: Legacy polyfill script not loaded yet" }
             }
@@ -162,7 +164,7 @@ class ClipboardImageInjectorImpl @Inject constructor(
     private suspend fun configureLegacyApproach(webView: WebView) {
         logcat { "ClipboardImageInjector: Configuring legacy approach (JavascriptInterface)" }
 
-        val jsInterface = ClipboardImageJavascriptInterface { dataUrl, mimeType ->
+        val jsInterface = ClipboardImageJavascriptInterface(legacySecret) { dataUrl, mimeType ->
             logcat { "ClipboardImageInjector: Legacy interface called, mimeType: $mimeType, dataLength: ${dataUrl.length}" }
             handleLegacyClipboardRequest(dataUrl, mimeType)
         }

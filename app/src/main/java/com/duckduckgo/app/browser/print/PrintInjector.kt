@@ -19,6 +19,7 @@ package com.duckduckgo.app.browser.print
 import android.webkit.WebView
 import com.duckduckgo.di.scopes.AppScope
 import com.squareup.anvil.annotations.ContributesBinding
+import java.util.UUID
 import javax.inject.Inject
 
 interface PrintInjector {
@@ -34,14 +35,16 @@ interface PrintInjector {
 
 @ContributesBinding(AppScope::class)
 class PrintInjectorJS @Inject constructor() : PrintInjector {
+    private val secret: String = UUID.randomUUID().toString()
+
     override fun addJsInterface(
         webView: WebView,
         onPrintDetected: () -> Unit,
     ) {
-        webView.addJavascriptInterface(PrintJavascriptInterface(onPrintDetected), PrintJavascriptInterface.JAVASCRIPT_INTERFACE_NAME)
+        webView.addJavascriptInterface(PrintJavascriptInterface(secret, onPrintDetected), PrintJavascriptInterface.JAVASCRIPT_INTERFACE_NAME)
     }
 
     override fun injectPrint(webView: WebView) {
-        webView.loadUrl("javascript:window.print = function() { ${PrintJavascriptInterface.JAVASCRIPT_INTERFACE_NAME}.print() }")
+        webView.loadUrl("javascript:window.print = function() { ${PrintJavascriptInterface.JAVASCRIPT_INTERFACE_NAME}.print('$secret') }")
     }
 }

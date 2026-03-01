@@ -63,7 +63,7 @@
                                 const captureToUse = mostRecentCapture;
                                 mostRecentCapture = null;
 
-                                DDGClipboard.copyImageToClipboard(captureToUse.dataUrl, type);
+                                DDGClipboard.copyImageToClipboard(captureToUse.dataUrl, type, window.ddgClipboardSecret || '');
                                 return Promise.resolve();
                             } else {
                                 mostRecentCapture = null;
@@ -74,7 +74,7 @@
                         const arrayBuffer = await blob.arrayBuffer();
                         const base64Data = arrayBufferToBase64DataUrl(arrayBuffer, type);
 
-                        DDGClipboard.copyImageToClipboard(base64Data, type);
+                        DDGClipboard.copyImageToClipboard(base64Data, type, window.ddgClipboardSecret || '');
                         return Promise.resolve();
                     } catch (e) {
                         // Error processing image

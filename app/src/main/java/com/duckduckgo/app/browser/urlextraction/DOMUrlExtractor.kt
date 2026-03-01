@@ -21,6 +21,7 @@ import android.webkit.WebView
 import androidx.annotation.UiThread
 import com.duckduckgo.app.browser.R
 import com.duckduckgo.app.browser.urlextraction.UrlExtractionJavascriptInterface.Companion.URL_EXTRACTION_JAVASCRIPT_INTERFACE_NAME
+import java.util.UUID
 
 interface DOMUrlExtractor {
     fun addUrlExtraction(webView: WebView, onUrlExtracted: (extractedUrl: String?) -> Unit)
@@ -29,14 +30,15 @@ interface DOMUrlExtractor {
 
 class JsUrlExtractor : DOMUrlExtractor {
     private val javaScriptDetector = JavaScriptDetector()
+    private val secret: String = UUID.randomUUID().toString()
 
     override fun addUrlExtraction(webView: WebView, onUrlExtracted: (extractedUrl: String?) -> Unit) {
-        webView.addJavascriptInterface(UrlExtractionJavascriptInterface(onUrlExtracted), URL_EXTRACTION_JAVASCRIPT_INTERFACE_NAME)
+        webView.addJavascriptInterface(UrlExtractionJavascriptInterface(secret, onUrlExtracted), URL_EXTRACTION_JAVASCRIPT_INTERFACE_NAME)
     }
 
     @UiThread
     override fun injectUrlExtractionJS(webView: WebView) {
-        webView.evaluateJavascript("javascript:${javaScriptDetector.getUrlExtractionJS(webView.context)}", null)
+        webView.evaluateJavascript("javascript:window.urlExtractionSecret='$secret';${javaScriptDetector.getUrlExtractionJS(webView.context)}", null)
     }
 
     private class JavaScriptDetector {

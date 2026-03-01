@@ -30,19 +30,20 @@ class AutoconsentInterfaceTest {
     private val mockWebView: WebView = mock()
     private val mockAutoconsentCallback: AutoconsentCallback = mock()
     private val pluginPoint = FakePluginPoint()
+    private val validSecret = "test-secret"
 
     lateinit var autoconsentInterface: AutoconsentInterface
 
     @Before
     fun setup() {
-        autoconsentInterface = AutoconsentInterface(pluginPoint, mockWebView, mockAutoconsentCallback)
+        autoconsentInterface = AutoconsentInterface(pluginPoint, mockWebView, mockAutoconsentCallback, validSecret)
     }
 
     @Test
     fun whenMessagedParsedIfTypeMatchesThenCallProcess() {
         val message = """{"type":"fake"}"""
 
-        autoconsentInterface.process(message)
+        autoconsentInterface.process(message, validSecret)
 
         assertEquals(1, pluginPoint.plugin.count)
     }
@@ -51,7 +52,25 @@ class AutoconsentInterfaceTest {
     fun whenMessagedParsedIfTypeDoesNotMatchThenDoNotCallProcess() {
         val message = """{"type":"noMatchingType"}"""
 
-        autoconsentInterface.process(message)
+        autoconsentInterface.process(message, validSecret)
+
+        assertEquals(0, pluginPoint.plugin.count)
+    }
+
+    @Test
+    fun whenSecretIsInvalidThenDoNotCallProcess() {
+        val message = """{"type":"fake"}"""
+
+        autoconsentInterface.process(message, "wrong-secret")
+
+        assertEquals(0, pluginPoint.plugin.count)
+    }
+
+    @Test
+    fun whenSecretIsEmptyThenDoNotCallProcess() {
+        val message = """{"type":"fake"}"""
+
+        autoconsentInterface.process(message, "")
 
         assertEquals(0, pluginPoint.plugin.count)
     }
