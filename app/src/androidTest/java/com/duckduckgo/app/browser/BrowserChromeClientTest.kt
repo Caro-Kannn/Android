@@ -37,6 +37,7 @@ import com.duckduckgo.common.test.CoroutineTestRule
 import com.duckduckgo.site.permissions.api.SitePermissionsManager
 import com.duckduckgo.site.permissions.api.SitePermissionsManager.SitePermissions
 import junit.framework.TestCase.assertEquals
+import junit.framework.TestCase.assertFalse
 import junit.framework.TestCase.assertTrue
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -245,6 +246,122 @@ class BrowserChromeClientTest {
         assertEquals(1, bitmap.width)
         assertEquals(1, bitmap.height)
         assertEquals(Color.TRANSPARENT, bitmap[0, 0])
+    }
+
+    @Test
+    fun whenInFullScreenThenJsAlertIsSuppressed() {
+        val mockResult: android.webkit.JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+
+        testee.onShowCustomView(fakeView, null)
+
+        val suppressed = testee.onJsAlert(null, "https://evil.com", "fake message", mockResult)
+
+        assertTrue(suppressed)
+        verify(mockResult).cancel()
+    }
+
+    @Test
+    fun whenNotInFullScreenAndActiveTabThenJsAlertIsAllowed() {
+        val mockResult: android.webkit.JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+
+        val suppressed = testee.onJsAlert(null, "https://example.com", "message", mockResult)
+
+        assertFalse(suppressed)
+        verify(mockResult, never()).cancel()
+    }
+
+    @Test
+    fun whenInFullScreenThenJsConfirmIsSuppressed() {
+        val mockResult: android.webkit.JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+
+        testee.onShowCustomView(fakeView, null)
+
+        val suppressed = testee.onJsConfirm(null, "https://evil.com", "fake message", mockResult)
+
+        assertTrue(suppressed)
+        verify(mockResult).cancel()
+    }
+
+    @Test
+    fun whenInFullScreenThenJsPromptIsSuppressed() {
+        val mockResult: android.webkit.JsPromptResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+
+        testee.onShowCustomView(fakeView, null)
+
+        val suppressed = testee.onJsPrompt(null, "https://evil.com", "fake message", "default", mockResult)
+
+        assertTrue(suppressed)
+        verify(mockResult).cancel()
+    }
+
+    @Test
+    fun whenInFullScreenThenPermissionRequestIsDenied() = runTest {
+        val mockRequest: PermissionRequest = mock()
+        whenever(mockRequest.resources).thenReturn(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+        whenever(mockRequest.origin).thenReturn("https://evil.com".toUri())
+
+        testee.onShowCustomView(fakeView, null)
+        testee.onPermissionRequest(mockRequest)
+
+        verify(mockRequest).deny()
+        verify(mockWebViewClientListener, never()).onSitePermissionRequested(any(), any())
+    }
+
+    @Test
+    fun whenNotInFullScreenThenPermissionRequestIsProcessed() = runTest {
+        val permissions = SitePermissions(
+            userHandled = listOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE),
+            autoAccept = emptyList(),
+        )
+        val mockRequest: PermissionRequest = mock()
+        whenever(mockWebViewClientListener.getCurrentTabId()).thenReturn("id")
+        whenever(mockRequest.resources).thenReturn(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+        whenever(mockRequest.origin).thenReturn("https://www.example.com".toUri())
+        whenever(mockSitePermissionsManager.getSitePermissions(any(), any())).thenReturn(permissions)
+
+        testee.onPermissionRequest(mockRequest)
+
+        verify(mockRequest, never()).deny()
+        verify(mockWebViewClientListener).onSitePermissionRequested(mockRequest, permissions)
+    }
+
+    @Test
+    fun whenFullScreenExitedThenJsAlertIsAllowedAgain() {
+        val mockResult: android.webkit.JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+
+        testee.onShowCustomView(fakeView, null)
+        testee.onHideCustomView()
+
+        val suppressed = testee.onJsAlert(null, "https://example.com", "message", mockResult)
+
+        assertFalse(suppressed)
+        verify(mockResult, never()).cancel()
+    }
+
+    @Test
+    fun whenFullScreenExitedThenPermissionRequestIsProcessed() = runTest {
+        val permissions = SitePermissions(
+            userHandled = listOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE),
+            autoAccept = emptyList(),
+        )
+        val mockRequest: PermissionRequest = mock()
+        whenever(mockWebViewClientListener.getCurrentTabId()).thenReturn("id")
+        whenever(mockRequest.resources).thenReturn(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+        whenever(mockRequest.origin).thenReturn("https://www.example.com".toUri())
+        whenever(mockSitePermissionsManager.getSitePermissions(any(), any())).thenReturn(permissions)
+
+        testee.onShowCustomView(fakeView, null)
+        testee.onHideCustomView()
+
+        testee.onPermissionRequest(mockRequest)
+
+        verify(mockRequest, never()).deny()
+        verify(mockWebViewClientListener).onSitePermissionRequested(mockRequest, permissions)
     }
 
     private val mockMsg = Message().apply {

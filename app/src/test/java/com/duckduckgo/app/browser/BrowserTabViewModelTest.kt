@@ -1941,6 +1941,43 @@ class BrowserTabViewModelTest {
     }
 
     @Test
+    fun whenInFullScreenAndUserPressesBackThenFullScreenExitedFirst() {
+        val stubView = View(context)
+        testee.goFullScreen(stubView)
+        assertTrue(browserViewState().isFullScreen)
+
+        val result = testee.onUserPressedBack()
+
+        assertTrue(result)
+        assertFalse(browserViewState().isFullScreen)
+    }
+
+    @Test
+    fun whenInFullScreenAndUserPressesBackThenNavigationDoesNotOccur() {
+        setupNavigation(isBrowsing = true, canGoBack = true, stepsToPreviousPage = 2)
+        val stubView = View(context)
+        testee.goFullScreen(stubView)
+
+        testee.onUserPressedBack()
+
+        assertFalse(browserViewState().isFullScreen)
+        val issuedCommand = commandCaptor.allValues.find { it is NavigationCommand.NavigateBack }
+        assertNull(issuedCommand)
+    }
+
+    @Test
+    fun whenNotInFullScreenAndUserPressesBackThenNormalNavigationOccurs() {
+        setupNavigation(isBrowsing = true, canGoBack = true, stepsToPreviousPage = 2)
+        assertFalse(browserViewState().isFullScreen)
+
+        assertTrue(testee.onUserPressedBack())
+
+        val backCommand = captureCommands().lastValue as NavigationCommand.NavigateBack
+        assertNotNull(backCommand)
+        assertEquals(2, backCommand.steps)
+    }
+
+    @Test
     fun whenUserSelectsDownloadImageOptionFromContextMenuThenDownloadCommandIssuedWithoutRequirementForFurtherUserConfirmation() {
         whenever(mockLongPressHandler.userSelectedMenuItem(any(), any()))
             .thenReturn(DownloadFile("example.com"))
