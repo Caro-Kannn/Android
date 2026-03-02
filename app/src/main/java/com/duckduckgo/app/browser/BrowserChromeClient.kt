@@ -147,11 +147,6 @@ class BrowserChromeClient @Inject constructor(
 
     override fun onPermissionRequest(request: PermissionRequest) {
         logcat { "Permissions: permission requested ${request.resources.asList()}" }
-        if (customView != null) {
-            logcat { "Permissions: denying permission request during fullscreen" }
-            request.deny()
-            return
-        }
         webViewClientListener?.getCurrentTabId()?.let { tabId ->
             appCoroutineScope.launch(coroutineDispatcher.io()) {
                 val permissionsAllowedToAsk = sitePermissionsManager.getSitePermissions(tabId, request)
@@ -216,12 +211,6 @@ class BrowserChromeClient @Inject constructor(
      * @return false to allow it to happen as normal; return true to suppress it from being shown
      */
     private fun shouldSuppressJavascriptDialog(result: JsResult): Boolean {
-        if (customView != null) {
-            logcat(VERBOSE) { "javascript dialog attempting to show during fullscreen; suppressing dialog" }
-            result.cancel()
-            return true
-        }
-
         if (webViewClientListener?.isActiveTab() == true) {
             return false
         }

@@ -1574,11 +1574,6 @@ class BrowserTabViewModel @Inject constructor(
      * @return true if navigation handled, otherwise false
      */
     fun onUserPressedBack(isCustomTab: Boolean = false): Boolean {
-        if (currentBrowserViewState().isFullScreen) {
-            exitFullScreen()
-            return true
-        }
-
         navigationAwareLoginDetector.onEvent(NavigationEvent.UserAction.NavigateBack)
         val hasSourceTab = tabRepository.liveSelectedTab.value?.sourceTabId != null
 
