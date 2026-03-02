@@ -702,6 +702,7 @@
 
     <!-- Full screen message-->
     <string name="fullScreenMessage">Drag down from the top and tap the back button to exit full screen</string>
+    <string name="fullScreenExitAction">Exit</string>
 
     <!-- Tab Switcher -->
     <string name="closeAppTabsConfirmationDialogTitle" instruction="Dialog title for deleting all open tabs">Close all tabs?</string>

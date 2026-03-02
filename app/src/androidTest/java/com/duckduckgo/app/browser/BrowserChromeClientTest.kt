@@ -247,6 +247,49 @@ class BrowserChromeClientTest {
         assertEquals(Color.TRANSPARENT, bitmap[0, 0])
     }
 
+    @Test
+    fun whenCustomViewCallbackProvidedThenCallbackIsStored() {
+        val mockCallback: WebChromeClient.CustomViewCallback = mock()
+        testee.onShowCustomView(fakeView, mockCallback)
+
+        testee.forceExitFullscreen()
+
+        verify(mockCallback).onCustomViewHidden()
+    }
+
+    @Test
+    fun whenForceExitCalledWithNoCallbackThenNoException() {
+        testee.forceExitFullscreen()
+        // Should not throw
+    }
+
+    @Test
+    fun whenCustomViewHiddenThenCallbackIsCleared() {
+        val mockCallback: WebChromeClient.CustomViewCallback = mock()
+        testee.onShowCustomView(fakeView, mockCallback)
+        testee.onHideCustomView()
+
+        testee.forceExitFullscreen()
+
+        verify(mockCallback, never()).onCustomViewHidden()
+    }
+
+    @Test
+    fun whenFullscreenReentryWithinCooldownThenRejected() {
+        val mockCallback1: WebChromeClient.CustomViewCallback = mock()
+        val mockCallback2: WebChromeClient.CustomViewCallback = mock()
+        val fakeView2 = View(getInstrumentation().targetContext)
+
+        testee.onShowCustomView(fakeView, mockCallback1)
+        testee.onHideCustomView()
+        // Immediately try to re-enter (within cooldown)
+        testee.onShowCustomView(fakeView2, mockCallback2)
+
+        // Second entry should be rejected
+        verify(mockCallback2).onCustomViewHidden()
+        verify(mockWebViewClientListener, times(1)).goFullScreen(fakeView)
+    }
+
     private val mockMsg = Message().apply {
         target = mock()
         obj = mock<WebView.WebViewTransport>()
