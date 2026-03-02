@@ -21,7 +21,6 @@ import android.graphics.Bitmap.Config.ARGB_8888
 import android.graphics.Color
 import android.net.Uri
 import android.os.Message
-import android.os.SystemClock
 import android.view.View
 import android.webkit.GeolocationPermissions
 import android.webkit.JsPromptResult
@@ -54,8 +53,6 @@ class BrowserChromeClient @Inject constructor(
     var webViewClientListener: WebViewClientListener? = null
 
     private var customView: View? = null
-    private var customViewCallback: CustomViewCallback? = null
-    private var lastFullscreenExitTime: Long = 0
 
     override fun onShowCustomView(
         view: View,
@@ -67,27 +64,14 @@ class BrowserChromeClient @Inject constructor(
             return
         }
 
-        if (SystemClock.elapsedRealtime() - lastFullscreenExitTime < FULLSCREEN_REENTRY_COOLDOWN_MS) {
-            logcat { "on show custom view rejected: fullscreen re-entry cooldown active" }
-            callback?.onCustomViewHidden()
-            return
-        }
-
         customView = view
-        customViewCallback = callback
         webViewClientListener?.goFullScreen(view)
     }
 
     override fun onHideCustomView() {
         logcat { "on hide custom view" }
-        lastFullscreenExitTime = SystemClock.elapsedRealtime()
         webViewClientListener?.exitFullScreen()
         customView = null
-        customViewCallback = null
-    }
-
-    fun forceExitFullscreen() {
-        customViewCallback?.onCustomViewHidden()
     }
 
     override fun onProgressChanged(
@@ -238,9 +222,5 @@ class BrowserChromeClient @Inject constructor(
 
     override fun getDefaultVideoPoster(): Bitmap {
         return Bitmap.createBitmap(intArrayOf(Color.TRANSPARENT), 1, 1, ARGB_8888)
-    }
-
-    companion object {
-        private const val FULLSCREEN_REENTRY_COOLDOWN_MS = 1000L
     }
 }

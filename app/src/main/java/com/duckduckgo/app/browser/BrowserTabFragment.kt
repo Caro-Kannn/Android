@@ -4797,7 +4797,6 @@ class BrowserTabFragment :
         private var lastSeenAutoCompleteViewState: AutoCompleteViewState? = null
         private var lastSeenCtaViewState: CtaViewState? = null
         private var lastSeenPrivacyShieldViewState: PrivacyShieldViewState? = null
-        private var fullscreenSnackbar: Snackbar? = null
 
         fun renderPrivacyShield(viewState: PrivacyShieldViewState) {
             renderIfChanged(viewState, lastSeenPrivacyShieldViewState) {
@@ -5290,18 +5289,10 @@ class BrowserTabFragment :
             omnibar.hide()
             binding.webViewFullScreenContainer.show()
             (activity as? DuckDuckGoActivity)?.toggleFullScreen()
-            fullscreenSnackbar?.dismiss()
-            fullscreenSnackbar = binding.webViewFullScreenContainer
-                .makeSnackbarWithNoBottomInset(R.string.fullScreenMessage, Snackbar.LENGTH_INDEFINITE)
-                .setAction(R.string.fullScreenExitAction) {
-                    viewModel.exitFullScreen()
-                }
-            fullscreenSnackbar?.show()
+            showToast(R.string.fullScreenMessage, Toast.LENGTH_SHORT)
         }
 
         private fun exitFullScreen() {
-            fullscreenSnackbar?.dismiss()
-            fullscreenSnackbar = null
             omnibar.show()
             binding.webViewFullScreenContainer.removeAllViews()
             binding.webViewFullScreenContainer.gone()

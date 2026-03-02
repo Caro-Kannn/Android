@@ -24,6 +24,8 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Message
 import android.view.View
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -37,6 +39,7 @@ import com.duckduckgo.common.test.CoroutineTestRule
 import com.duckduckgo.site.permissions.api.SitePermissionsManager
 import com.duckduckgo.site.permissions.api.SitePermissionsManager.SitePermissions
 import junit.framework.TestCase.assertEquals
+import junit.framework.TestCase.assertFalse
 import junit.framework.TestCase.assertTrue
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -77,6 +80,8 @@ class BrowserChromeClientTest {
         webView = TestWebView(getInstrumentation().targetContext)
         mockSitePermissionsManager.stub { onBlocking { getSitePermissions(any(), any()) }.thenReturn(SitePermissions(emptyList(), emptyList())) }
     }
+
+    // ===== Original Tests =====
 
     @Test
     fun whenWindowClosedThenCloseCurrentTab() {
@@ -247,47 +252,536 @@ class BrowserChromeClientTest {
         assertEquals(Color.TRANSPARENT, bitmap[0, 0])
     }
 
+    // ===== Fullscreen Security: Edge Cases =====
+
     @Test
-    fun whenCustomViewCallbackProvidedThenCallbackIsStored() {
+    fun whenShowCustomViewWithNullCallbackThenFullScreenStillActivated() {
+        testee.onShowCustomView(fakeView, null)
+        verify(mockWebViewClientListener).goFullScreen(fakeView)
+    }
+
+    @Test
+    fun whenShowCustomViewWithNullCallbackAndAlreadyFullScreenThenNoExceptionThrown() {
+        testee.onShowCustomView(fakeView, null)
+        testee.onShowCustomView(fakeView, null)
+        // Should not throw; second call is silently ignored
+        verify(mockWebViewClientListener, times(1)).goFullScreen(fakeView)
+    }
+
+    @Test
+    fun whenHideCustomViewCalledWithoutPriorShowThenExitFullScreenStillCalled() {
+        testee.onHideCustomView()
+        verify(mockWebViewClientListener).exitFullScreen()
+    }
+
+    @Test
+    fun whenHideCustomViewCalledTwiceThenExitFullScreenCalledTwice() {
+        testee.onShowCustomView(fakeView, null)
+        testee.onHideCustomView()
+        testee.onHideCustomView()
+        verify(mockWebViewClientListener, times(2)).exitFullScreen()
+    }
+
+    @Test
+    fun whenShowHideShowSequenceThenSecondShowAllowed() {
+        val fakeView2 = View(getInstrumentation().targetContext)
+        testee.onShowCustomView(fakeView, null)
+        testee.onHideCustomView()
+        testee.onShowCustomView(fakeView2, null)
+        verify(mockWebViewClientListener).goFullScreen(fakeView)
+        verify(mockWebViewClientListener).goFullScreen(fakeView2)
+    }
+
+    @Test
+    fun whenRapidShowHideCyclesThenEachCycleIsHandledCorrectly() {
+        for (i in 1..10) {
+            val view = View(getInstrumentation().targetContext)
+            testee.onShowCustomView(view, null)
+            testee.onHideCustomView()
+        }
+        verify(mockWebViewClientListener, times(10)).goFullScreen(any())
+        verify(mockWebViewClientListener, times(10)).exitFullScreen()
+    }
+
+    @Test
+    fun whenShowWithDifferentViewWhileAlreadyFullScreenThenSecondViewRejected() {
+        val fakeView2 = View(getInstrumentation().targetContext)
         val mockCallback: WebChromeClient.CustomViewCallback = mock()
-        testee.onShowCustomView(fakeView, mockCallback)
-
-        testee.forceExitFullscreen()
-
+        testee.onShowCustomView(fakeView, null)
+        testee.onShowCustomView(fakeView2, mockCallback)
+        verify(mockWebViewClientListener, times(1)).goFullScreen(fakeView)
+        verify(mockWebViewClientListener, never()).goFullScreen(fakeView2)
         verify(mockCallback).onCustomViewHidden()
     }
 
     @Test
-    fun whenForceExitCalledWithNoCallbackThenNoException() {
-        testee.forceExitFullscreen()
-        // Should not throw
+    fun whenListenerRemovedDuringFullScreenThenHideDoesNotCrash() {
+        testee.onShowCustomView(fakeView, null)
+        testee.webViewClientListener = null
+        testee.onHideCustomView()
+        // Should not throw NPE; listener is null
     }
 
     @Test
-    fun whenCustomViewHiddenThenCallbackIsCleared() {
+    fun whenListenerIsNullOnShowCustomViewThenNoInteractionAndNoCrash() {
+        testee.webViewClientListener = null
+        testee.onShowCustomView(fakeView, null)
+        // No exception, goFullScreen not called (no listener)
+    }
+
+    @Test
+    fun whenListenerIsNullAndCallbackProvidedThenCallbackNotCalledOnFirstEntry() {
+        testee.webViewClientListener = null
         val mockCallback: WebChromeClient.CustomViewCallback = mock()
         testee.onShowCustomView(fakeView, mockCallback)
-        testee.onHideCustomView()
-
-        testee.forceExitFullscreen()
-
+        // Callback should not be called (this is the first entry, not a duplicate)
         verify(mockCallback, never()).onCustomViewHidden()
     }
 
     @Test
-    fun whenFullscreenReentryWithinCooldownThenRejected() {
-        val mockCallback1: WebChromeClient.CustomViewCallback = mock()
-        val mockCallback2: WebChromeClient.CustomViewCallback = mock()
-        val fakeView2 = View(getInstrumentation().targetContext)
+    fun whenListenerIsNullAndAlreadyInFullScreenThenDuplicateCallbackStillFired() {
+        testee.onShowCustomView(fakeView, null)
+        testee.webViewClientListener = null
+        val mockCallback: WebChromeClient.CustomViewCallback = mock()
+        testee.onShowCustomView(fakeView, mockCallback)
+        verify(mockCallback).onCustomViewHidden()
+    }
 
-        testee.onShowCustomView(fakeView, mockCallback1)
-        testee.onHideCustomView()
-        // Immediately try to re-enter (within cooldown)
-        testee.onShowCustomView(fakeView2, mockCallback2)
+    // ===== Fullscreen Security: JS Dialog Suppression =====
 
-        // Second entry should be rejected
-        verify(mockCallback2).onCustomViewHidden()
+    @Test
+    fun whenJsAlertOnActiveTabThenNotSuppressed() {
+        val mockResult: JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+        val suppressed = testee.onJsAlert(null, "https://example.com", "Hello", mockResult)
+        assertFalse(suppressed)
+        verify(mockResult, never()).cancel()
+    }
+
+    @Test
+    fun whenJsAlertOnInactiveTabThenSuppressed() {
+        val mockResult: JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(false)
+        val suppressed = testee.onJsAlert(null, "https://example.com", "Hello", mockResult)
+        assertTrue(suppressed)
+        verify(mockResult).cancel()
+    }
+
+    @Test
+    fun whenJsConfirmOnActiveTabThenNotSuppressed() {
+        val mockResult: JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+        val suppressed = testee.onJsConfirm(null, "https://example.com", "Confirm?", mockResult)
+        assertFalse(suppressed)
+        verify(mockResult, never()).cancel()
+    }
+
+    @Test
+    fun whenJsConfirmOnInactiveTabThenSuppressed() {
+        val mockResult: JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(false)
+        val suppressed = testee.onJsConfirm(null, "https://example.com", "Confirm?", mockResult)
+        assertTrue(suppressed)
+        verify(mockResult).cancel()
+    }
+
+    @Test
+    fun whenJsPromptOnActiveTabThenNotSuppressed() {
+        val mockResult: JsPromptResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+        val suppressed = testee.onJsPrompt(null, "https://example.com", "Enter:", "default", mockResult)
+        assertFalse(suppressed)
+        verify(mockResult, never()).cancel()
+    }
+
+    @Test
+    fun whenJsPromptOnInactiveTabThenSuppressed() {
+        val mockResult: JsPromptResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(false)
+        val suppressed = testee.onJsPrompt(null, "https://example.com", "Enter:", "default", mockResult)
+        assertTrue(suppressed)
+        verify(mockResult).cancel()
+    }
+
+    @Test
+    fun whenJsAlertWithNullListenerThenSuppressed() {
+        testee.webViewClientListener = null
+        val mockResult: JsResult = mock()
+        val suppressed = testee.onJsAlert(null, "https://example.com", "Hello", mockResult)
+        assertTrue(suppressed)
+        verify(mockResult).cancel()
+    }
+
+    @Test
+    fun whenJsConfirmWithNullListenerThenSuppressed() {
+        testee.webViewClientListener = null
+        val mockResult: JsResult = mock()
+        val suppressed = testee.onJsConfirm(null, "https://example.com", "Confirm?", mockResult)
+        assertTrue(suppressed)
+        verify(mockResult).cancel()
+    }
+
+    @Test
+    fun whenJsPromptWithNullListenerThenSuppressed() {
+        testee.webViewClientListener = null
+        val mockResult: JsPromptResult = mock()
+        val suppressed = testee.onJsPrompt(null, "https://example.com", "Enter:", "default", mockResult)
+        assertTrue(suppressed)
+        verify(mockResult).cancel()
+    }
+
+    // ===== Fullscreen Security: JS Dialogs with Malformed/Invalid Inputs =====
+
+    @Test
+    fun whenJsAlertWithEmptyUrlThenBehaviorConsistentWithActiveTab() {
+        val mockResult: JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+        val suppressed = testee.onJsAlert(null, "", "", mockResult)
+        assertFalse(suppressed)
+    }
+
+    @Test
+    fun whenJsAlertWithNullViewThenHandledNormally() {
+        val mockResult: JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+        val suppressed = testee.onJsAlert(null, "https://example.com", "message", mockResult)
+        assertFalse(suppressed)
+    }
+
+    @Test
+    fun whenJsPromptWithNullUrlAndMessageThenBehaviorConsistentWithActiveTab() {
+        val mockResult: JsPromptResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+        val suppressed = testee.onJsPrompt(null, null, null, null, mockResult)
+        assertFalse(suppressed)
+    }
+
+    @Test
+    fun whenJsConfirmWithNullUrlAndMessageThenBehaviorConsistentWithActiveTab() {
+        val mockResult: JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+        val suppressed = testee.onJsConfirm(null, null, null, mockResult)
+        assertFalse(suppressed)
+    }
+
+    @Test
+    fun whenJsAlertWithVeryLongMessageOnActiveTabThenNotSuppressed() {
+        val mockResult: JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+        val longMessage = "A".repeat(10000)
+        val suppressed = testee.onJsAlert(null, "https://example.com", longMessage, mockResult)
+        assertFalse(suppressed)
+    }
+
+    @Test
+    fun whenJsAlertWithSpecialCharactersInUrlOnActiveTabThenNotSuppressed() {
+        val mockResult: JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+        val suppressed = testee.onJsAlert(null, "javascript:void(0)", "XSS attempt", mockResult)
+        assertFalse(suppressed)
+    }
+
+    @Test
+    fun whenJsAlertWithDataUriOnActiveTabThenNotSuppressed() {
+        val mockResult: JsResult = mock()
+        whenever(mockWebViewClientListener.isActiveTab()).thenReturn(true)
+        val suppressed = testee.onJsAlert(null, "data:text/html,<h1>test</h1>", "data uri alert", mockResult)
+        assertFalse(suppressed)
+    }
+
+    // ===== Fullscreen Security: Fullscreen State During Other Operations =====
+
+    @UiThreadTest
+    @Test
+    fun whenInFullScreenAndProgressChangedThenProgressStillReported() {
+        testee.onShowCustomView(fakeView, null)
+        testee.onProgressChanged(webView, 50)
+        verify(mockWebViewClientListener).progressChanged(eq(20), any())
+    }
+
+    @Test
+    fun whenInFullScreenAndTitleReceivedThenTitleStillReported() {
+        testee.onShowCustomView(fakeView, null)
+        testee.onReceivedTitle(webView, "New Title")
+        verify(mockWebViewClientListener).titleReceived("New Title")
+    }
+
+    @Test
+    fun whenInFullScreenAndIconReceivedThenIconStillReported() {
+        val bitmap: Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.RGB_565)
+        testee.onShowCustomView(fakeView, null)
+        testee.onReceivedIcon(webView, bitmap)
+        verify(mockWebViewClientListener).iconReceived(webView.url, bitmap)
+    }
+
+    @Test
+    fun whenInFullScreenAndFileChooserRequestedThenFileChooserStillShown() {
+        testee.onShowCustomView(fakeView, null)
+        assertTrue(testee.onShowFileChooser(webView, mockFilePathCallback, mockFileChooserParams))
+        verify(mockWebViewClientListener).showFileChooser(mockFilePathCallback, mockFileChooserParams)
+    }
+
+    @Test
+    fun whenInFullScreenAndWindowClosedThenTabStillClosed() {
+        testee.onShowCustomView(fakeView, null)
+        testee.onCloseWindow(null)
+        verify(mockWebViewClientListener).closeCurrentTab()
+    }
+
+    @Test
+    fun whenInFullScreenAndPermissionRequestedThenStillProcessed() = runTest {
+        val permissions = SitePermissions(
+            userHandled = listOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE),
+            autoAccept = emptyList(),
+        )
+        val mockRequest: PermissionRequest = mock()
+        whenever(mockWebViewClientListener.getCurrentTabId()).thenReturn("id")
+        whenever(mockRequest.resources).thenReturn(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+        whenever(mockRequest.origin).thenReturn("https://www.example.com".toUri())
+        whenever(mockSitePermissionsManager.getSitePermissions(any(), any())).thenReturn(permissions)
+
+        testee.onShowCustomView(fakeView, null)
+        testee.onPermissionRequest(mockRequest)
+
+        verify(mockWebViewClientListener).onSitePermissionRequested(mockRequest, permissions)
+    }
+
+    // ===== Fullscreen Security: Window Creation =====
+
+    @UiThreadTest
+    @Test
+    fun whenInFullScreenAndWindowCreatedWithGestureThenNewTabOpened() {
+        whenever(mockAppBuildConfig.isTest).thenReturn(false)
+        testee.onShowCustomView(fakeView, null)
+        testee.onCreateWindow(webView, isDialog = false, isUserGesture = true, resultMsg = mockMsg)
+        verify(mockWebViewClientListener).openMessageInNewTab(eq(mockMsg))
+    }
+
+    @UiThreadTest
+    @Test
+    fun whenWindowCreatedWithNullResultMsgThenNoNewTab() {
+        testee.onCreateWindow(webView, isDialog = false, isUserGesture = true, resultMsg = null)
+        verify(mockWebViewClientListener, never()).openMessageInNewTab(any())
+    }
+
+    @UiThreadTest
+    @Test
+    fun whenWindowCreatedAsDialogWithGestureThenNewTabOpened() {
+        testee.onCreateWindow(webView, isDialog = true, isUserGesture = true, resultMsg = mockMsg)
+        verify(mockWebViewClientListener).openMessageInNewTab(eq(mockMsg))
+    }
+
+    @UiThreadTest
+    @Test
+    fun whenWindowCreatedWithNonTransportObjectThenNoNewTab() {
+        val msg = Message().apply {
+            target = mock()
+            obj = "not a transport"
+        }
+        testee.onCreateWindow(webView, isDialog = false, isUserGesture = true, resultMsg = msg)
+        verify(mockWebViewClientListener, never()).openMessageInNewTab(any())
+    }
+
+    // ===== Fullscreen Security: Permission Edge Cases =====
+
+    @Test
+    fun whenPermissionRequestedWithNullTabIdThenNotProcessed() = runTest {
+        val mockRequest: PermissionRequest = mock()
+        whenever(mockWebViewClientListener.getCurrentTabId()).thenReturn(null)
+        whenever(mockRequest.resources).thenReturn(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+
+        testee.onPermissionRequest(mockRequest)
+
+        verify(mockWebViewClientListener, never()).onSitePermissionRequested(any(), any())
+    }
+
+    @Test
+    fun whenPermissionRequestedWithMultipleResourcesThenProcessed() = runTest {
+        val permissions = SitePermissions(
+            userHandled = listOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE, PermissionRequest.RESOURCE_AUDIO_CAPTURE),
+            autoAccept = emptyList(),
+        )
+        val mockRequest: PermissionRequest = mock()
+        whenever(mockWebViewClientListener.getCurrentTabId()).thenReturn("id")
+        whenever(mockRequest.resources).thenReturn(arrayOf(
+            PermissionRequest.RESOURCE_VIDEO_CAPTURE,
+            PermissionRequest.RESOURCE_AUDIO_CAPTURE,
+        ))
+        whenever(mockRequest.origin).thenReturn("https://www.example.com".toUri())
+        whenever(mockSitePermissionsManager.getSitePermissions(any(), any())).thenReturn(permissions)
+
+        testee.onPermissionRequest(mockRequest)
+
+        verify(mockWebViewClientListener).onSitePermissionRequested(mockRequest, permissions)
+    }
+
+    @Test
+    fun whenPermissionRequestedWithEmptyResourcesThenNotForwarded() = runTest {
+        val permissions = SitePermissions(emptyList(), emptyList())
+        val mockRequest: PermissionRequest = mock()
+        whenever(mockWebViewClientListener.getCurrentTabId()).thenReturn("id")
+        whenever(mockRequest.resources).thenReturn(arrayOf())
+        whenever(mockRequest.origin).thenReturn("https://www.example.com".toUri())
+        whenever(mockSitePermissionsManager.getSitePermissions(any(), any())).thenReturn(permissions)
+
+        testee.onPermissionRequest(mockRequest)
+
+        verify(mockWebViewClientListener, never()).onSitePermissionRequested(any(), any())
+    }
+
+    @Test
+    fun whenPermissionRequestedWithNullListenerThenNoException() = runTest {
+        testee.webViewClientListener = null
+        val mockRequest: PermissionRequest = mock()
+        whenever(mockRequest.resources).thenReturn(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+
+        testee.onPermissionRequest(mockRequest)
+        // Should not throw
+    }
+
+    // ===== Fullscreen Security: Callback Behavior =====
+
+    @Test
+    fun whenCallbackProvidedAndCustomViewAlreadySetThenCallbackFiredImmediately() {
+        val firstCallback: WebChromeClient.CustomViewCallback = mock()
+        val secondCallback: WebChromeClient.CustomViewCallback = mock()
+        testee.onShowCustomView(fakeView, firstCallback)
+        testee.onShowCustomView(fakeView, secondCallback)
+        verify(firstCallback, never()).onCustomViewHidden()
+        verify(secondCallback).onCustomViewHidden()
+    }
+
+    @Test
+    fun whenMultipleCallbacksProvidedInRapidSuccessionThenOnlyFirstAccepted() {
+        val callbacks = (1..5).map { mock<WebChromeClient.CustomViewCallback>() }
+        val views = (1..5).map { View(getInstrumentation().targetContext) }
+
+        testee.onShowCustomView(views[0], callbacks[0])
+        for (i in 1..4) {
+            testee.onShowCustomView(views[i], callbacks[i])
+        }
+
+        verify(callbacks[0], never()).onCustomViewHidden()
+        for (i in 1..4) {
+            verify(callbacks[i]).onCustomViewHidden()
+        }
+        verify(mockWebViewClientListener, times(1)).goFullScreen(views[0])
+    }
+
+    @Test
+    fun whenNullCallbackDuplicateEntryThenNoExceptionThrown() {
+        testee.onShowCustomView(fakeView, null)
+        testee.onShowCustomView(fakeView, null)
+        // Second call with null callback should not crash
         verify(mockWebViewClientListener, times(1)).goFullScreen(fakeView)
+    }
+
+    // ===== Fullscreen Security: State Consistency =====
+
+    @Test
+    fun whenShowThenHideThenShowAgainThenBothShowsAllowed() {
+        val view1 = View(getInstrumentation().targetContext)
+        val view2 = View(getInstrumentation().targetContext)
+
+        testee.onShowCustomView(view1, null)
+        verify(mockWebViewClientListener).goFullScreen(view1)
+
+        testee.onHideCustomView()
+        verify(mockWebViewClientListener).exitFullScreen()
+
+        testee.onShowCustomView(view2, null)
+        verify(mockWebViewClientListener).goFullScreen(view2)
+    }
+
+    @Test
+    fun whenShowThenHideThenShowSameViewAgainThenAllowed() {
+        testee.onShowCustomView(fakeView, null)
+        testee.onHideCustomView()
+        testee.onShowCustomView(fakeView, null)
+        verify(mockWebViewClientListener, times(2)).goFullScreen(fakeView)
+    }
+
+    @Test
+    fun whenHideCalledMultipleTimesWithoutShowThenExitCalledEachTime() {
+        testee.onHideCustomView()
+        testee.onHideCustomView()
+        testee.onHideCustomView()
+        verify(mockWebViewClientListener, times(3)).exitFullScreen()
+    }
+
+    // ===== Fullscreen Security: Listener Lifecycle =====
+
+    @Test
+    fun whenListenerSetToNullAfterShowThenHideDoesNotCallExitFullScreen() {
+        testee.onShowCustomView(fakeView, null)
+        verify(mockWebViewClientListener).goFullScreen(fakeView)
+
+        testee.webViewClientListener = null
+        testee.onHideCustomView()
+        // exitFullScreen was never called because listener is null
+        verify(mockWebViewClientListener, never()).exitFullScreen()
+    }
+
+    @Test
+    fun whenListenerReplacedBetweenShowAndHideThenNewListenerReceivesExit() {
+        testee.onShowCustomView(fakeView, null)
+        verify(mockWebViewClientListener).goFullScreen(fakeView)
+
+        val newListener: WebViewClientListener = mock()
+        testee.webViewClientListener = newListener
+        testee.onHideCustomView()
+
+        verify(mockWebViewClientListener, never()).exitFullScreen()
+        verify(newListener).exitFullScreen()
+    }
+
+    @Test
+    fun whenListenerReplacedDuringFullScreenThenNewListenerUsedForDuplicateRejection() {
+        testee.onShowCustomView(fakeView, null)
+
+        val newListener: WebViewClientListener = mock()
+        testee.webViewClientListener = newListener
+
+        val mockCallback: WebChromeClient.CustomViewCallback = mock()
+        testee.onShowCustomView(fakeView, mockCallback)
+
+        // Duplicate should still be rejected even with new listener
+        verify(mockCallback).onCustomViewHidden()
+        verify(newListener, never()).goFullScreen(any())
+    }
+
+    // ===== Fullscreen Security: Default Video Poster =====
+
+    @Test
+    fun whenDefaultVideoPosterRequestedMultipleTimesThenAlwaysReturnsBitmap() = runTest {
+        val bitmap1 = testee.defaultVideoPoster
+        val bitmap2 = testee.defaultVideoPoster
+        assertEquals(1, bitmap1.width)
+        assertEquals(1, bitmap1.height)
+        assertEquals(1, bitmap2.width)
+        assertEquals(1, bitmap2.height)
+    }
+
+    // ===== Fullscreen Security: Geolocation Permission =====
+
+    @Test
+    fun whenGeolocationPermissionRequestedThenDelegatedToOnPermissionRequest() = runTest {
+        val mockCallback: android.webkit.GeolocationPermissions.Callback = mock()
+        whenever(mockWebViewClientListener.getCurrentTabId()).thenReturn("id")
+
+        testee.onGeolocationPermissionsShowPrompt("https://example.com", mockCallback)
+
+        // The geolocation request is wrapped in a LocationPermissionRequest and delegated
+        // to onPermissionRequest, which calls getSitePermissions
+        verify(mockSitePermissionsManager).getSitePermissions(eq("id"), any())
+    }
+
+    @Test
+    fun whenGeolocationPermissionRequestedWithNullListenerThenNoException() {
+        testee.webViewClientListener = null
+        val mockCallback: android.webkit.GeolocationPermissions.Callback = mock()
+        testee.onGeolocationPermissionsShowPrompt("https://example.com", mockCallback)
+        // Should not throw
     }
 
     private val mockMsg = Message().apply {
